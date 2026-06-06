@@ -7,7 +7,8 @@ namespace Plexus.Sidecar.Contract;
 public sealed class Node
 {
     public string Id { get; set; } = "";
-    public string? ParentId { get; set; } // single parent (tree). DAG is P2.
+    public string? ParentId { get; set; } // primary parent
+    public List<string>? MergeParents { get; set; } // P2 DAG merge: extra parents
     public string Role { get; set; } = "user"; // "user" | "assistant"
     public string CreatedAt { get; set; } = ""; // ISO-8601
     public List<Block> Blocks { get; set; } = new();

@@ -34,6 +34,7 @@ public sealed class SendMessageEvent : ClientEvent
 {
     public string GraphId { get; set; } = "";
     public string? FromNodeId { get; set; } // null = start of a fresh graph
+    public List<string>? FromNodeIds { get; set; } // P2 DAG merge: ≥2 → union-of-ancestors
     public string Text { get; set; } = "";
     public RoutingPolicy? Policy { get; set; } // resolved (node override ?? session default)
 }

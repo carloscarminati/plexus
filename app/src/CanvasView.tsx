@@ -94,15 +94,16 @@ function badgeOf(meta: { model?: string; costUsd?: number } | undefined): string
 
 export function CanvasView({
   graph,
-  selectedId,
+  selectedIds,
   pending,
-  onSelect,
+  onClickNode,
 }: {
   graph: Graph;
-  selectedId: string | null;
+  selectedIds: string[];
   pending: Pending | null;
-  onSelect: (id: string) => void;
+  onClickNode: (id: string, additive: boolean) => void;
 }) {
+  const selected = new Set(selectedIds);
   const { nodes, edges } = useMemo(() => {
     const g = new Dagre.graphlib.Graph().setDefaultEdgeLabel(() => ({}));
     g.setGraph({ rankdir: "TB", nodesep: 28, ranksep: 56 });
@@ -113,6 +114,7 @@ export function CanvasView({
       preview: previewOf(n.blocks),
       types: n.blocks.map((b) => b.type),
       parentId: n.parentId,
+      mergeParents: n.mergeParents ?? [],
       badge: badgeOf(n.meta),
       reason: n.meta?.reason,
     }));
@@ -124,17 +126,30 @@ export function CanvasView({
         preview: "",
         types: [],
         parentId: pending.parentId,
+        mergeParents: [],
         badge: undefined,
         reason: undefined,
       });
     }
 
+    const ids = new Set(cards.map((c) => c.id));
     for (const c of cards) g.setNode(c.id, { width: NODE_W, height: NODE_H });
     const rfEdges: Edge[] = [];
     for (const c of cards) {
-      if (c.parentId && cards.some((x) => x.id === c.parentId)) {
-        g.setEdge(c.parentId, c.id);
-        rfEdges.push({ id: `${c.parentId}-${c.id}`, source: c.parentId, target: c.id });
+      const parents: { id: string; merge: boolean }[] = [];
+      if (c.parentId) parents.push({ id: c.parentId, merge: false });
+      for (const p of c.mergeParents) parents.push({ id: p, merge: true });
+      for (const p of parents) {
+        if (!ids.has(p.id)) continue;
+        g.setEdge(p.id, c.id);
+        rfEdges.push({
+          id: `${p.id}-${c.id}`,
+          source: p.id,
+          target: c.id,
+          // P2 merge edges are dashed + animated to read as a union, not a tree edge.
+          animated: p.merge,
+          style: p.merge ? { strokeDasharray: "5 4", stroke: "var(--accent)" } : undefined,
+        });
       }
     }
     Dagre.layout(g);
@@ -152,7 +167,7 @@ export function CanvasView({
           badge: c.badge,
           reason: c.reason,
           thinking: pending?.nodeId === c.id,
-          selected: selectedId === c.id,
+          selected: selected.has(c.id),
         },
         width: NODE_W,
         height: NODE_H,
@@ -160,14 +175,15 @@ export function CanvasView({
     });
 
     return { nodes: rfNodes, edges: rfEdges };
-  }, [graph, selectedId, pending]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [graph, selectedIds.join(","), pending]);
 
   return (
     <ReactFlow
       nodes={nodes}
       edges={edges}
       nodeTypes={nodeTypes}
-      onNodeClick={(_, node) => onSelect(node.id)}
+      onNodeClick={(e, node) => onClickNode(node.id, e.shiftKey || e.metaKey)}
       nodesDraggable={false}
       fitView
       fitViewOptions={{ padding: 0.25, maxZoom: 1 }}

@@ -189,8 +189,8 @@ This is the standard ancestor-walk used by existing canvas chats. The merge case
 - [x] Add `chart` and `choices` blocks (incl. the intent round-trip).
 - [x] Prompt-prefix caching enabled.
 
-### P2 — Reach — ⏳ Planned
-- [ ] DAG merge: multi-select nodes, union-of-ancestors context.
+### P2 — Reach — 🚧 In progress
+- [x] DAG merge: multi-select nodes, union-of-ancestors context. *(done — `node.mergeParents`, multi-parent ancestor-walk in `BuildHistory`, shift/⌘-click multi-select on the canvas with dashed merge edges)*
 - [ ] MCP host (official C# SDK) wired; `mcp_ui` block renders MCP Apps UI resources in a sandboxed iframe.
 - [ ] Optional: migrate the block catalog onto Vercel json-render.
 - [ ] Optional: expose Plexus's own MCP server.

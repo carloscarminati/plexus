@@ -63,6 +63,7 @@ export interface McpUiBlock {
 export interface Node {
   id: string;
   parentId: string | null;
+  mergeParents?: string[]; // P2 DAG merge: extra parents beyond parentId
   role: "user" | "assistant";
   createdAt: string;
   blocks: Block[];
@@ -110,7 +111,7 @@ export type ClientEvent =
   | { type: "load_graph"; graphId: string }
   | { type: "list_graphs" }
   | { type: "new_graph"; title?: string }
-  | { type: "send_message"; graphId: string; fromNodeId: string | null; text: string; policy?: RoutingPolicy }
+  | { type: "send_message"; graphId: string; fromNodeId: string | null; fromNodeIds?: string[]; text: string; policy?: RoutingPolicy }
   | { type: "intent"; graphId: string; nodeId: string; kind: string; payload: unknown; policy?: RoutingPolicy }
   | { type: "set_session_policy"; graphId: string; policy: RoutingPolicy }
   | { type: "list_models" };

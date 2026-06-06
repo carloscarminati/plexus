@@ -14,8 +14,9 @@ function App() {
     graph,
     pending,
     error,
+    selectedIds,
     selectedId,
-    select,
+    clickNode,
     models,
     sessionPolicy,
     setSessionPolicy,
@@ -29,7 +30,8 @@ function App() {
 
   const nodes = graph?.nodes ?? [];
   const selected = nodes.find((n) => n.id === selectedId) ?? null;
-  const branching = selectedId != null && nodes.some((n) => n.parentId === selectedId);
+  const merging = selectedIds.length >= 2; // P2 DAG merge
+  const branching = !merging && selectedId != null && nodes.some((n) => n.parentId === selectedId);
 
   useEffect(() => {
     detailRef.current?.scrollTo({ top: detailRef.current.scrollHeight });
@@ -73,7 +75,7 @@ function App() {
       <div className="workspace">
         <div className="canvas-pane">
           {graph && nodes.length > 0 ? (
-            <CanvasView graph={graph} selectedId={selectedId} pending={pending} onSelect={select} />
+            <CanvasView graph={graph} selectedIds={selectedIds} pending={pending} onClickNode={clickNode} />
           ) : (
             <div className="empty">Send a message to start the graph.</div>
           )}
@@ -127,6 +129,9 @@ function App() {
           {error && <div className="error-bar">{error}</div>}
 
           <form className="composer" onSubmit={submit}>
+            {merging && (
+              <div className="branch-hint">⤚ merging {selectedIds.length} nodes — the new turn gets the union of their context</div>
+            )}
             {branching && <div className="branch-hint">↳ branching from the selected {selected?.role} node</div>}
             <div className="composer-row">
               <textarea
@@ -142,9 +147,11 @@ function App() {
                 placeholder={
                   status !== "online"
                     ? "Connecting to sidecar…"
-                    : selected
-                      ? `Reply from this ${selected.role} node…`
-                      : "Send a message…"
+                    : merging
+                      ? `Merge ${selectedIds.length} nodes into a new turn…`
+                      : selected
+                        ? `Reply from this ${selected.role} node…`
+                        : "Send a message…"
                 }
                 disabled={status !== "online"}
                 rows={3}

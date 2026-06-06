@@ -53,17 +53,21 @@ public sealed class GraphStore
                 created_at  TEXT NOT NULL,
                 blocks_json TEXT NOT NULL,
                 raw         TEXT NOT NULL,
-                meta_json   TEXT
+                meta_json   TEXT,
+                merge_parents_json TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_nodes_graph ON nodes(graph_id);
             """;
         cmd.ExecuteNonQuery();
 
-        // Migration for DBs created before R1: add policy_json if missing.
-        using var migrate = conn.CreateCommand();
-        migrate.CommandText = "ALTER TABLE graphs ADD COLUMN policy_json TEXT;";
-        try { migrate.ExecuteNonQuery(); }
-        catch (SqliteException) { /* column already exists */ }
+        // Migrations for older DBs (ALTER throws if the column already exists).
+        foreach (var (table, col) in new[] { ("graphs", "policy_json TEXT"), ("nodes", "merge_parents_json TEXT") })
+        {
+            using var migrate = conn.CreateCommand();
+            migrate.CommandText = $"ALTER TABLE {table} ADD COLUMN {col};";
+            try { migrate.ExecuteNonQuery(); }
+            catch (SqliteException) { /* column already exists */ }
+        }
     }
 
     public List<GraphSummary> ListGraphs()
@@ -147,7 +151,7 @@ public sealed class GraphStore
         using (var ncmd = conn.CreateCommand())
         {
             ncmd.CommandText = """
-                SELECT id, parent_id, role, created_at, blocks_json, raw, meta_json
+                SELECT id, parent_id, role, created_at, blocks_json, raw, meta_json, merge_parents_json
                 FROM nodes WHERE graph_id = $gid ORDER BY created_at ASC;
                 """;
             ncmd.Parameters.AddWithValue("$gid", graphId);
@@ -163,10 +167,14 @@ public sealed class GraphStore
                     Blocks = Json.Deserialize<List<Block>>(reader.GetString(4)) ?? new(),
                     Raw = reader.GetString(5),
                     Meta = reader.IsDBNull(6) ? null : Json.Deserialize<NodeMeta>(reader.GetString(6)),
+                    MergeParents = reader.IsDBNull(7) ? null : Json.Deserialize<List<string>>(reader.GetString(7)),
                 };
                 graph.Nodes.Add(node);
                 if (node.ParentId is not null)
                     graph.Edges.Add(new Edge { From = node.ParentId, To = node.Id });
+                if (node.MergeParents is not null)
+                    foreach (var p in node.MergeParents)
+                        graph.Edges.Add(new Edge { From = p, To = node.Id });
             }
         }
 
@@ -178,8 +186,8 @@ public sealed class GraphStore
         using var conn = Open();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
-            INSERT INTO nodes (id, graph_id, parent_id, role, created_at, blocks_json, raw, meta_json)
-            VALUES ($id, $gid, $parent, $role, $createdAt, $blocks, $raw, $meta);
+            INSERT INTO nodes (id, graph_id, parent_id, role, created_at, blocks_json, raw, meta_json, merge_parents_json)
+            VALUES ($id, $gid, $parent, $role, $createdAt, $blocks, $raw, $meta, $merge);
             """;
         cmd.Parameters.AddWithValue("$id", node.Id);
         cmd.Parameters.AddWithValue("$gid", graphId);
@@ -189,6 +197,7 @@ public sealed class GraphStore
         cmd.Parameters.AddWithValue("$blocks", Json.Serialize(node.Blocks));
         cmd.Parameters.AddWithValue("$raw", node.Raw);
         cmd.Parameters.AddWithValue("$meta", node.Meta is null ? DBNull.Value : Json.Serialize(node.Meta));
+        cmd.Parameters.AddWithValue("$merge", node.MergeParents is null ? DBNull.Value : Json.Serialize(node.MergeParents));
         cmd.ExecuteNonQuery();
     }
 }

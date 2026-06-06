@@ -94,7 +94,7 @@ public sealed class WebSocketHub
                     });
                     break;
                 }
-                await _conversation.RunTurnAsync(sm.GraphId, sm.FromNodeId, sm.Text, SendAsync, sm.Policy, ct);
+                await _conversation.RunTurnAsync(sm.GraphId, sm.FromNodeId, sm.Text, SendAsync, sm.Policy, sm.FromNodeIds, ct);
                 break;
 
             case IntentEvent intent:
@@ -133,7 +133,7 @@ public sealed class WebSocketHub
                 return;
             }
             // Branch from the node that showed the choices.
-            await _conversation.RunTurnAsync(intent.GraphId, intent.NodeId, text, SendAsync, intent.Policy, ct);
+            await _conversation.RunTurnAsync(intent.GraphId, intent.NodeId, text, SendAsync, intent.Policy, fromNodeIds: null, ct: ct);
             return;
         }
 

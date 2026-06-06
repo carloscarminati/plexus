@@ -75,7 +75,8 @@ export interface McpUiBlock {
 
 export interface Node {
   id: string;
-  parentId: string | null; // single parent (tree). DAG/multi-parent is P2.
+  parentId: string | null; // primary parent. Tree by default.
+  mergeParents?: string[]; // P2 DAG merge: extra parents beyond parentId (union-of-ancestors)
   role: "user" | "assistant";
   createdAt: string; // ISO; used to order reconstructed history
   blocks: Block[]; // for user turns this is usually one markdown block
@@ -128,8 +129,9 @@ export type ClientEvent =
   | { type: "list_graphs" }
   | { type: "new_graph"; title?: string }
   // fromNodeId null = start of a fresh graph; otherwise resume/branch from that node.
+  // fromNodeIds (P2 DAG merge): ≥2 nodes → context = union-of-ancestors of all of them.
   // policy = the resolved routing policy (per-node override ?? session default).
-  | { type: "send_message"; graphId: string; fromNodeId: string | null; text: string; policy?: RoutingPolicy }
+  | { type: "send_message"; graphId: string; fromNodeId: string | null; fromNodeIds?: string[]; text: string; policy?: RoutingPolicy }
   // P1 — a `choices`/`mcp_ui` block fired an interactive intent.
   | { type: "intent"; graphId: string; nodeId: string; kind: string; payload: unknown; policy?: RoutingPolicy }
   // R1 — persist the session default routing policy.

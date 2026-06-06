@@ -100,6 +100,17 @@ Key design points:
 - **Model-aware request shape** — adaptive thinking + effort are only sent to models that support them (Opus 4.6+/Sonnet 4.6), not Haiku 4.5 — required once the router can pick a small model.
 - Telemetry schema is **unchanged**; `policy`/`reason` now carry the real auto values (`auto:cost`, `auto/cost: cheapest capable (...)`, `auto:cost: sticky branch model (...)`).
 
+## Model graph: DAG merge (P2)
+
+A node has a primary `parentId` plus optional `mergeParents[]`. Selecting ≥2
+nodes on the canvas (shift/⌘-click) and sending creates a **merge node** whose
+context is the **deduplicated union of every selected node's ancestor path** —
+`ConversationService.BuildHistory` walks both `parentId` and `mergeParents` (a
+graph traversal, deduped by id, ordered by `createdAt`), so the model sees both
+branches at once. The merge node carries edges from all its parents (dashed on
+the canvas). Persisted via the `nodes.merge_parents_json` column. Routing
+stickiness follows the primary parent.
+
 ## Caveat for later
 
 The app currently relies on reflection-based `System.Text.Json`. If we ever trim/AOT the sidecar, the polymorphic block serialization needs source-generated `JsonSerializerContext`.

@@ -46,16 +46,27 @@ public sealed class ConversationService
         string text,
         Func<ServerEvent, Task> emit,
         RoutingPolicy? requestedPolicy = null,
+        IReadOnlyList<string>? fromNodeIds = null,
         CancellationToken ct = default)
     {
         var graph = _store.LoadGraph(graphId)
             ?? throw new InvalidOperationException($"Graph '{graphId}' not found.");
 
-        // 1. The user's message branches from the selected node (or root).
+        // Resolve the parent set. fromNodeIds (≥2) = P2 DAG merge: the user node
+        // gets multiple parents and its context is the union of all their ancestor
+        // paths. Otherwise it's a normal single-parent (tree) turn.
+        var parents = (fromNodeIds is { Count: > 0 })
+            ? fromNodeIds.Where(id => !string.IsNullOrEmpty(id)).Distinct().ToList()
+            : (fromNodeId is null ? new List<string>() : new List<string> { fromNodeId });
+        var primary = parents.Count > 0 ? parents[0] : null;
+        var mergeParents = parents.Count > 1 ? parents.Skip(1).ToList() : null;
+
+        // 1. The user's message branches from the selected node(s) (or root).
         var userNode = new Node
         {
             Id = Guid.NewGuid().ToString("n"),
-            ParentId = fromNodeId,
+            ParentId = primary,
+            MergeParents = mergeParents,
             Role = "user",
             CreatedAt = DateTimeOffset.UtcNow.ToString("o"),
             Blocks = new List<Block> { new MarkdownBlock { Text = text } },
@@ -85,7 +96,7 @@ public sealed class ConversationService
         // Branch-level stickiness (§4.1): keep the branch's model unless the policy
         // changed or the sticky model can no longer meet `requires` (e.g. now needs
         // vision). Manual policies skip stickiness — the model is explicit and wins.
-        var (branchModel, branchProvider, branchPolicyCanon) = NearestAssistantRouting(graph, fromNodeId);
+        var (branchModel, branchProvider, branchPolicyCanon) = NearestAssistantRouting(graph, primary);
         ModelChoice choice;
         if (effective.Kind == "auto"
             && branchModel is not null
@@ -168,23 +179,32 @@ public sealed class ConversationService
     private static int EstimateTokens(IReadOnlyList<(string Role, string Content)> history)
         => history.Sum(h => h.Content.Length) / 4;
 
-    // Walk from `nodeId` to the root following parentId, then order by createdAt
-    // so the model sees the conversation in chronological order. User turns are
-    // sent as-is; assistant turns use their stored raw text (not a re-render).
+    // Collect all ancestors of `nodeId` following BOTH parentId and mergeParents,
+    // deduplicated by id, ordered by createdAt. For a tree node this is the simple
+    // ancestor chain; for a P2 merge node (multiple parents) it's the deduplicated
+    // union of every parent's ancestor path (SPEC.md §4.4). User turns are sent
+    // as-is; assistant turns use their stored raw text (not a re-render).
     public static List<(string Role, string Content)> BuildHistory(Graph graph, string nodeId)
     {
         var byId = graph.Nodes.ToDictionary(n => n.Id);
-        var chain = new List<Node>();
-        string? cursor = nodeId;
-        while (cursor is not null && byId.TryGetValue(cursor, out var node))
+        var seen = new HashSet<string>();
+        var collected = new List<Node>();
+        var stack = new Stack<string>();
+        stack.Push(nodeId);
+        while (stack.Count > 0)
         {
-            chain.Add(node);
-            cursor = node.ParentId;
+            var id = stack.Pop();
+            if (!seen.Add(id) || !byId.TryGetValue(id, out var node))
+                continue;
+            collected.Add(node);
+            if (node.ParentId is not null)
+                stack.Push(node.ParentId);
+            if (node.MergeParents is not null)
+                foreach (var p in node.MergeParents)
+                    stack.Push(p);
         }
 
-        chain.Reverse(); // root -> leaf
-        chain.Sort((a, b) => string.CompareOrdinal(a.CreatedAt, b.CreatedAt));
-
-        return chain.Select(n => (n.Role, n.Raw)).ToList();
+        collected.Sort((a, b) => string.CompareOrdinal(a.CreatedAt, b.CreatedAt));
+        return collected.Select(n => (n.Role, n.Raw)).ToList();
     }
 }

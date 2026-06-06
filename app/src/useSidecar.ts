@@ -15,9 +15,9 @@ export function useSidecar() {
   const [graph, setGraph] = useState<Graph | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Selection is a set: 1 node = branch/resume from it; ≥2 = P2 DAG merge.
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [models, setModels] = useState<ModelInfo[]>([]);
-  // R1 routing: session default policy + per-node overrides (manual always wins).
   const [sessionPolicy, setSessionPolicyState] = useState<RoutingPolicy>({ kind: "manual", modelId: "claude-opus-4-8" });
   const [nodeOverrides, setNodeOverrides] = useState<Record<string, RoutingPolicy>>({});
   const socketRef = useRef<WebSocket | null>(null);
@@ -36,7 +36,10 @@ export function useSidecar() {
         case "graph":
           setGraph(msg.graph);
           setPending(null);
-          setSelectedId(msg.graph.nodes[msg.graph.nodes.length - 1]?.id ?? null);
+          {
+            const last = msg.graph.nodes[msg.graph.nodes.length - 1]?.id;
+            setSelectedIds(last ? [last] : []);
+          }
           if (msg.graph.defaultPolicy) setSessionPolicyState(msg.graph.defaultPolicy);
           break;
         case "node_created":
@@ -46,19 +49,9 @@ export function useSidecar() {
           setPending({ nodeId: msg.nodeId, parentId: msg.parentId });
           break;
         case "turn_completed":
-          setGraph((g) =>
-            g
-              ? {
-                  ...g,
-                  nodes: [...g.nodes, msg.node],
-                  edges: msg.node.parentId
-                    ? [...g.edges, { from: msg.node.parentId, to: msg.node.id }]
-                    : g.edges,
-                }
-              : g,
-          );
+          setGraph((g) => (g ? { ...g, nodes: [...g.nodes, msg.node] } : g));
           setPending(null);
-          setSelectedId(msg.node.id);
+          setSelectedIds([msg.node.id]); // continue from the fresh assistant node
           break;
         case "models":
           setModels(msg.models);
@@ -101,23 +94,19 @@ export function useSidecar() {
     };
   }, []);
 
-  useEffect(() => {
-    setGraph((g) => {
-      if (!g) return g;
-      const have = new Set(g.edges.map((e) => `${e.from}->${e.to}`));
-      const edges = [...g.edges];
-      for (const n of g.nodes) {
-        if (n.parentId && !have.has(`${n.parentId}->${n.id}`)) {
-          edges.push({ from: n.parentId, to: n.id });
-          have.add(`${n.parentId}->${n.id}`);
-        }
-      }
-      return edges.length === g.edges.length ? g : { ...g, edges };
+  // Click a node: plain click selects only it; shift/cmd-click toggles it in the
+  // set (for a DAG merge of ≥2 nodes).
+  const clickNode = useCallback((id: string, additive: boolean) => {
+    setSelectedIds((prev) => {
+      if (!additive) return [id];
+      return prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
     });
-  }, [graph?.nodes.length]);
+  }, []);
 
-  // The policy that applies to a turn branching from `nodeId`: the node's
-  // override if set, otherwise the session default. Manual override wins.
+  const primaryId = selectedIds.length > 0 ? selectedIds[0] : null;
+
+  // The policy for a turn from `nodeId`: the node's override if set, else the
+  // session default. Manual override wins.
   const effectivePolicy = useCallback(
     (nodeId: string | null): RoutingPolicy => (nodeId && nodeOverrides[nodeId]) || sessionPolicy,
     [nodeOverrides, sessionPolicy],
@@ -127,9 +116,17 @@ export function useSidecar() {
     (text: string) => {
       if (!graph || !text.trim() || pending) return;
       setError(null);
-      send({ type: "send_message", graphId: graph.id, fromNodeId: selectedId, text, policy: effectivePolicy(selectedId) });
+      const merge = selectedIds.length >= 2;
+      send({
+        type: "send_message",
+        graphId: graph.id,
+        fromNodeId: primaryId,
+        fromNodeIds: merge ? selectedIds : undefined,
+        text,
+        policy: effectivePolicy(primaryId),
+      });
     },
-    [graph, selectedId, pending, send, effectivePolicy],
+    [graph, selectedIds, primaryId, pending, send, effectivePolicy],
   );
 
   const sendChoice = useCallback(
@@ -163,8 +160,9 @@ export function useSidecar() {
     graph,
     pending,
     error,
-    selectedId,
-    select: setSelectedId,
+    selectedIds,
+    selectedId: primaryId, // the node shown in the detail pane
+    clickNode,
     models,
     sessionPolicy,
     setSessionPolicy,
