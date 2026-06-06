@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Plexus.Sidecar.Routing;
 
 namespace Plexus.Sidecar.Contract;
 
@@ -13,6 +14,8 @@ namespace Plexus.Sidecar.Contract;
 [JsonDerivedType(typeof(NewGraphEvent), "new_graph")]
 [JsonDerivedType(typeof(SendMessageEvent), "send_message")]
 [JsonDerivedType(typeof(IntentEvent), "intent")]
+[JsonDerivedType(typeof(SetSessionPolicyEvent), "set_session_policy")]
+[JsonDerivedType(typeof(ListModelsEvent), "list_models")]
 public abstract class ClientEvent { }
 
 public sealed class LoadGraphEvent : ClientEvent
@@ -32,6 +35,7 @@ public sealed class SendMessageEvent : ClientEvent
     public string GraphId { get; set; } = "";
     public string? FromNodeId { get; set; } // null = start of a fresh graph
     public string Text { get; set; } = "";
+    public RoutingPolicy? Policy { get; set; } // resolved (node override ?? session default)
 }
 
 public sealed class IntentEvent : ClientEvent // P1
@@ -40,7 +44,16 @@ public sealed class IntentEvent : ClientEvent // P1
     public string NodeId { get; set; } = "";
     public string Kind { get; set; } = "";
     public JsonElement Payload { get; set; }
+    public RoutingPolicy? Policy { get; set; }
 }
+
+public sealed class SetSessionPolicyEvent : ClientEvent // R1 — persist the session default
+{
+    public string GraphId { get; set; } = "";
+    public RoutingPolicy Policy { get; set; } = RoutingPolicy.Manual("claude-opus-4-8");
+}
+
+public sealed class ListModelsEvent : ClientEvent { } // R1 — request the curated candidate set
 
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]
 [JsonDerivedType(typeof(GraphsServerEvent), "graphs")]
@@ -49,8 +62,27 @@ public sealed class IntentEvent : ClientEvent // P1
 [JsonDerivedType(typeof(TurnStartedServerEvent), "turn_started")]
 [JsonDerivedType(typeof(TurnDeltaServerEvent), "turn_delta")]
 [JsonDerivedType(typeof(TurnCompletedServerEvent), "turn_completed")]
+[JsonDerivedType(typeof(ModelsServerEvent), "models")]
 [JsonDerivedType(typeof(ErrorServerEvent), "error")]
 public abstract class ServerEvent { }
+
+// One curated candidate model (R1), with metadata for the Manual picker.
+public sealed class ModelInfo
+{
+    public string Id { get; set; } = "";
+    public string ProviderId { get; set; } = "";
+    public string Tier { get; set; } = ""; // "small" | "mid" | "large"
+    public double CostInPerMTok { get; set; }
+    public double CostOutPerMTok { get; set; }
+    public int ContextWindow { get; set; }
+    public bool ToolCall { get; set; }
+    public bool Vision { get; set; }
+}
+
+public sealed class ModelsServerEvent : ServerEvent
+{
+    public List<ModelInfo> Models { get; set; } = new();
+}
 
 public sealed class GraphsServerEvent : ServerEvent
 {

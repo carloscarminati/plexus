@@ -1,3 +1,5 @@
+using Plexus.Sidecar.Routing;
+
 namespace Plexus.Sidecar.Contract;
 
 // Mirror of the Graph model in contract/blocks.ts.
@@ -21,7 +23,8 @@ public sealed class NodeMeta
     public int? TokensOut { get; set; }
     public double? CostUsd { get; set; }
     public long? LatencyMs { get; set; }
-    public string? Reason { get; set; } // why this model was picked (router)
+    public string? Reason { get; set; }  // why this model was picked (router)
+    public string? Policy { get; set; }  // canonical effective policy ("auto:cost", "manual:<id>")
 }
 
 public sealed class Edge
@@ -36,6 +39,7 @@ public sealed class Graph
     public string? Title { get; set; }
     public List<Node> Nodes { get; set; } = new();
     public List<Edge> Edges { get; set; } = new();
+    public RoutingPolicy? DefaultPolicy { get; set; } // session default routing policy
 }
 
 public sealed class GraphSummary

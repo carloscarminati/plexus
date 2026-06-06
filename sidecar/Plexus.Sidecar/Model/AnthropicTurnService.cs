@@ -57,6 +57,12 @@ public sealed class AnthropicTurnService
                 : new MessageParam { Role = roleEnum, Content = content });
         }
 
+        // Adaptive thinking + effort are supported on Opus 4.6+ and Sonnet 4.6,
+        // but NOT on Haiku 4.5 (or other tiers) — sending them there 400s. Gate by
+        // model so the router can pick a small model without breaking the call.
+        var advanced = modelId.Contains("opus", StringComparison.OrdinalIgnoreCase)
+                       || modelId.Contains("sonnet-4-6", StringComparison.OrdinalIgnoreCase);
+
         var parameters = new MessageCreateParams
         {
             Model = modelId,
@@ -65,8 +71,8 @@ public sealed class AnthropicTurnService
             {
                 new() { Text = SystemPrompt.Text, CacheControl = new CacheControlEphemeral() },
             },
-            Thinking = new ThinkingConfigAdaptive(),
-            OutputConfig = new OutputConfig { Effort = Effort.High },
+            Thinking = advanced ? new ThinkingConfigAdaptive() : (ThinkingConfigParam?)null,
+            OutputConfig = advanced ? new OutputConfig { Effort = Effort.High } : null,
             Messages = messages,
         };
 

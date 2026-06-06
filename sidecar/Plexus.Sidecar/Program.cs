@@ -19,7 +19,10 @@ builder.Services.AddHttpClient();
 builder.Services.AddSingleton<ModelRegistry>(sp => new ModelRegistry(
     sp.GetRequiredService<IHttpClientFactory>().CreateClient(),
     sp.GetRequiredService<ILogger<ModelRegistry>>()));
-builder.Services.AddSingleton<IModelRouter, ManualRouter>();
+// R1: manual + heuristic behind one IModelRouter (CompositeRouter dispatches by policy).
+builder.Services.AddSingleton<ManualRouter>();
+builder.Services.AddSingleton<HeuristicRouter>();
+builder.Services.AddSingleton<IModelRouter, CompositeRouter>();
 builder.Services.AddSingleton<ITelemetrySink>(sp =>
     new SqliteTelemetrySink(sp.GetRequiredService<ILogger<SqliteTelemetrySink>>()));
 builder.Services.AddHostedService<RegistryRefreshService>();
@@ -56,6 +59,7 @@ app.Map("/ws", async (HttpContext context) =>
         socket,
         context.RequestServices.GetRequiredService<GraphStore>(),
         context.RequestServices.GetService<ConversationService>(), // null when no API key
+        context.RequestServices.GetRequiredService<ModelRegistry>(),
         logger);
     await hub.RunAsync(context.RequestAborted);
 });

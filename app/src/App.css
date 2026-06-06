@@ -538,3 +538,48 @@ body {
   text-overflow: ellipsis;
   max-width: 130px;
 }
+
+/* R1: routing policy control */
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.policy-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.policy-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.policy-picker select {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 6px;
+  font-size: 12px;
+  font-family: inherit;
+}
+.policy-picker select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.branch-policy {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.branch-reason {
+  font-size: 11px;
+  color: var(--muted);
+  font-style: italic;
+}

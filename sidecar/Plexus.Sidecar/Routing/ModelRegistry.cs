@@ -74,24 +74,41 @@ public sealed class ModelRegistry
         }
     }
 
-    public ModelMetadata? GetMetadata(string modelId)
+    // Provider-scoped lookup — the correct one for curated candidates, whose
+    // provider is known. Avoids matching a reseller that re-lists a model id
+    // (e.g. "302ai/claude-sonnet-4-6-...") under the wrong provider/pricing.
+    public ModelMetadata? GetMetadata(string providerId, string modelId)
     {
         lock (_gate)
         {
-            if (_models.TryGetValue(modelId, out var exact))
+            if (_models.TryGetValue($"{providerId}/{modelId}", out var exact))
                 return exact;
             // models.dev keys are often date-suffixed (claude-haiku-4-5-20251001);
-            // match our alias by prefix.
-            var match = _models.Values.FirstOrDefault(m => m.Id.StartsWith(modelId, StringComparison.OrdinalIgnoreCase));
+            // match our alias by prefix, but only within the candidate's provider.
+            var match = _models.Values.FirstOrDefault(m =>
+                m.ProviderId.Equals(providerId, StringComparison.OrdinalIgnoreCase) &&
+                m.Id.StartsWith(modelId, StringComparison.OrdinalIgnoreCase));
             if (match is not null)
                 return match;
         }
         return FallbackPricing.TryGetValue(modelId, out var fb) ? fb : null;
     }
 
-    public double? EstimateCostUsd(string modelId, int? tokensIn, int? tokensOut)
+    // Provider-agnostic lookup (best-effort) — kept for callers that only have a
+    // model id. Prefers an exact id, then the curated-provider fallback table.
+    public ModelMetadata? GetMetadata(string modelId)
     {
-        var meta = GetMetadata(modelId);
+        lock (_gate)
+        {
+            if (_models.TryGetValue(modelId, out var exact))
+                return exact;
+        }
+        return FallbackPricing.TryGetValue(modelId, out var fb) ? fb : null;
+    }
+
+    public double? EstimateCostUsd(string providerId, string modelId, int? tokensIn, int? tokensOut)
+    {
+        var meta = GetMetadata(providerId, modelId);
         if (meta is null)
             return null;
         var inCost = (tokensIn ?? 0) / 1_000_000.0 * meta.CostInPerMTok;
@@ -168,8 +185,11 @@ public sealed class ModelRegistry
                         StructuredOutput: toolCall,
                         Reasoning: GetBool(m, "reasoning"),
                         Vision: vision);
-                    // Also index by bare id for alias lookups.
-                    map.TryAdd(id, map[$"{providerId}/{id}"]);
+                    // NOTE: intentionally NOT indexing by bare id — bare ids
+                    // collide across providers (resellers re-list "claude-*"),
+                    // which would mis-attribute a manual model to the wrong
+                    // provider/pricing. Lookups are provider-scoped or fall back
+                    // to the curated table.
                 }
             }
 

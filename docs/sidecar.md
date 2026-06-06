@@ -80,6 +80,26 @@ The chosen model + cost + latency + reason are stored in `node.meta` and shown a
 | Telemetry per call `{model, provider, tokensIn/out, cost, latencyMs, policy, reason}` | done (log + SQLite) |
 | Each node displays a model badge + cost | done |
 
+### R1 status — heuristic auto-routing
+
+`HeuristicRouter` slots behind the unchanged `IModelRouter`; `CompositeRouter` dispatches `manual → ManualRouter`, `auto → HeuristicRouter`.
+
+| R1 acceptance criterion | Status |
+| --- | --- |
+| `RoutingPolicy` toggle in the UI: Manual / Auto-cost / Auto-quality / Auto-balanced | done (unified `PolicyPicker`, one component for session default + per-node override) |
+| `HeuristicRouter`: capability-filter → tiering (signals: prompt+history length, code, tool/structured-output, depth) | done |
+| Manual override always wins over auto | done |
+| `ModelChoice.reason` surfaced in the node badge | done (hover) |
+| Trivial prompt under Auto-cost → cheapest capable; tool-requiring prompt never picks a non-tool model; never picks a non-structured-output model | done (capability filter; verified) |
+
+Key design points:
+- **Curated candidate set** — `CandidateSet` hard-codes per-provider `{small, mid, large}` (anthropic: haiku-4-5 / sonnet-4-6 / opus-4-8). We do **not** route over the 7000+ models.dev catalog; models.dev is metadata-only.
+- **Two-step** (§2): capability filter (`structuredOutput` always required; tool/vision/minContext as detected) → policy optimize (cost = cheapest capable; quality = top tier; balanced = complexity-target tier, capped by `budgetPerTurn`).
+- **Branch-level stickiness** (§4.1): a turn reuses the branch's model under the same policy; re-routes only when the policy changes or `requires` forces it (sticky `reason` in telemetry).
+- **Provider-scoped registry lookups** — bare model ids collide across resellers on models.dev, so candidate/cost lookups are scoped to the candidate's provider; the bare-id index was removed.
+- **Model-aware request shape** — adaptive thinking + effort are only sent to models that support them (Opus 4.6+/Sonnet 4.6), not Haiku 4.5 — required once the router can pick a small model.
+- Telemetry schema is **unchanged**; `policy`/`reason` now carry the real auto values (`auto:cost`, `auto/cost: cheapest capable (...)`, `auto:cost: sticky branch model (...)`).
+
 ## Caveat for later
 
 The app currently relies on reflection-based `System.Text.Json`. If we ever trim/AOT the sidecar, the polymorphic block serialization needs source-generated `JsonSerializerContext`.

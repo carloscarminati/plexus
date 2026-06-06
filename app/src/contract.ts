@@ -75,6 +75,7 @@ export interface Node {
     costUsd?: number;
     latencyMs?: number;
     reason?: string;
+    policy?: string; // canonical effective policy ("auto:cost", "manual:<id>")
   };
 }
 
@@ -83,14 +84,36 @@ export interface Graph {
   title?: string;
   nodes: Node[];
   edges: { from: string; to: string }[];
+  defaultPolicy?: RoutingPolicy;
+}
+
+// ── Model routing (R1) ──────────────────────────────────────────────────────
+
+export type RoutingObjective = "cost" | "quality" | "balanced";
+
+export type RoutingPolicy =
+  | { kind: "manual"; modelId: string }
+  | { kind: "auto"; objective: RoutingObjective; budgetPerTurn?: number };
+
+export interface ModelInfo {
+  id: string;
+  providerId: string;
+  tier: "small" | "mid" | "large";
+  costInPerMTok: number;
+  costOutPerMTok: number;
+  contextWindow: number;
+  toolCall: boolean;
+  vision: boolean;
 }
 
 export type ClientEvent =
   | { type: "load_graph"; graphId: string }
   | { type: "list_graphs" }
   | { type: "new_graph"; title?: string }
-  | { type: "send_message"; graphId: string; fromNodeId: string | null; text: string }
-  | { type: "intent"; graphId: string; nodeId: string; kind: string; payload: unknown };
+  | { type: "send_message"; graphId: string; fromNodeId: string | null; text: string; policy?: RoutingPolicy }
+  | { type: "intent"; graphId: string; nodeId: string; kind: string; payload: unknown; policy?: RoutingPolicy }
+  | { type: "set_session_policy"; graphId: string; policy: RoutingPolicy }
+  | { type: "list_models" };
 
 export type ServerEvent =
   | { type: "graphs"; graphs: { id: string; title?: string }[] }
@@ -99,4 +122,5 @@ export type ServerEvent =
   | { type: "turn_started"; nodeId: string; parentId: string | null }
   | { type: "turn_delta"; nodeId: string; blocks: Block[] }
   | { type: "turn_completed"; node: Node }
+  | { type: "models"; models: ModelInfo[] }
   | { type: "error"; message: string };

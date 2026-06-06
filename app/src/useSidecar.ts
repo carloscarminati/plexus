@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ClientEvent, Graph, ServerEvent } from "./contract";
+import type { ClientEvent, Graph, ModelInfo, RoutingPolicy, ServerEvent } from "./contract";
 
 const SIDECAR_URL = "ws://127.0.0.1:8765/ws";
 
@@ -15,8 +15,11 @@ export function useSidecar() {
   const [graph, setGraph] = useState<Graph | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // The node a new message branches from. null = start a fresh root turn.
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [models, setModels] = useState<ModelInfo[]>([]);
+  // R1 routing: session default policy + per-node overrides (manual always wins).
+  const [sessionPolicy, setSessionPolicyState] = useState<RoutingPolicy>({ kind: "manual", modelId: "claude-opus-4-8" });
+  const [nodeOverrides, setNodeOverrides] = useState<Record<string, RoutingPolicy>>({});
   const socketRef = useRef<WebSocket | null>(null);
 
   const send = useCallback((event: ClientEvent) => {
@@ -34,6 +37,7 @@ export function useSidecar() {
           setGraph(msg.graph);
           setPending(null);
           setSelectedId(msg.graph.nodes[msg.graph.nodes.length - 1]?.id ?? null);
+          if (msg.graph.defaultPolicy) setSessionPolicyState(msg.graph.defaultPolicy);
           break;
         case "node_created":
           setGraph((g) => (g ? { ...g, nodes: [...g.nodes, msg.node] } : g));
@@ -54,7 +58,10 @@ export function useSidecar() {
               : g,
           );
           setPending(null);
-          setSelectedId(msg.node.id); // continue from the fresh assistant node
+          setSelectedId(msg.node.id);
+          break;
+        case "models":
+          setModels(msg.models);
           break;
         case "error":
           setError(msg.message);
@@ -70,6 +77,7 @@ export function useSidecar() {
       sock.onopen = () => {
         setStatus("online");
         sock.send(JSON.stringify({ type: "new_graph", title: "Conversation" } satisfies ClientEvent));
+        sock.send(JSON.stringify({ type: "list_models" } satisfies ClientEvent));
       };
       sock.onmessage = (ev) => {
         try {
@@ -93,7 +101,6 @@ export function useSidecar() {
     };
   }, []);
 
-  // Also append the user node's edge as it arrives, for live canvas wiring.
   useEffect(() => {
     setGraph((g) => {
       if (!g) return g;
@@ -109,23 +116,61 @@ export function useSidecar() {
     });
   }, [graph?.nodes.length]);
 
+  // The policy that applies to a turn branching from `nodeId`: the node's
+  // override if set, otherwise the session default. Manual override wins.
+  const effectivePolicy = useCallback(
+    (nodeId: string | null): RoutingPolicy => (nodeId && nodeOverrides[nodeId]) || sessionPolicy,
+    [nodeOverrides, sessionPolicy],
+  );
+
   const sendMessage = useCallback(
     (text: string) => {
       if (!graph || !text.trim() || pending) return;
       setError(null);
-      send({ type: "send_message", graphId: graph.id, fromNodeId: selectedId, text });
+      send({ type: "send_message", graphId: graph.id, fromNodeId: selectedId, text, policy: effectivePolicy(selectedId) });
     },
-    [graph, selectedId, pending, send],
+    [graph, selectedId, pending, send, effectivePolicy],
   );
 
   const sendChoice = useCallback(
     (nodeId: string, option: { id: string; label: string }) => {
       if (!graph || pending) return;
       setError(null);
-      send({ type: "intent", graphId: graph.id, nodeId, kind: "choice", payload: option });
+      send({ type: "intent", graphId: graph.id, nodeId, kind: "choice", payload: option, policy: effectivePolicy(nodeId) });
     },
-    [graph, pending, send],
+    [graph, pending, send, effectivePolicy],
   );
 
-  return { status, graph, pending, error, selectedId, select: setSelectedId, sendMessage, sendChoice };
+  const setSessionPolicy = useCallback(
+    (policy: RoutingPolicy) => {
+      setSessionPolicyState(policy);
+      if (graph) send({ type: "set_session_policy", graphId: graph.id, policy });
+    },
+    [graph, send],
+  );
+
+  const setNodeOverride = useCallback((nodeId: string, policy: RoutingPolicy | null) => {
+    setNodeOverrides((prev) => {
+      const next = { ...prev };
+      if (policy) next[nodeId] = policy;
+      else delete next[nodeId];
+      return next;
+    });
+  }, []);
+
+  return {
+    status,
+    graph,
+    pending,
+    error,
+    selectedId,
+    select: setSelectedId,
+    models,
+    sessionPolicy,
+    setSessionPolicy,
+    nodeOverrides,
+    setNodeOverride,
+    sendMessage,
+    sendChoice,
+  };
 }

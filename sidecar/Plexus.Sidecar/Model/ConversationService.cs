@@ -45,6 +45,7 @@ public sealed class ConversationService
         string? fromNodeId,
         string text,
         Func<ServerEvent, Task> emit,
+        RoutingPolicy? requestedPolicy = null,
         CancellationToken ct = default)
     {
         var graph = _store.LoadGraph(graphId)
@@ -71,15 +72,33 @@ public sealed class ConversationService
         // 3. Reconstruct context: ancestors of the user node, oldest first.
         var history = BuildHistory(graph, userNode.Id);
 
-        // 4. Pick a model via the router. Default to branch-level routing
-        //    (SPEC-model-routing §4.1): inherit the model of the nearest assistant
-        //    ancestor so a branch stays sticky and keeps its prompt cache.
-        var stickyModel = NearestAssistantModel(graph, fromNodeId) ?? DefaultModel;
+        // 4. Resolve the effective policy and pick a model.
         var requires = new RequestRequirements(
-            StructuredOutput: true,
+            StructuredOutput: true, // always — block emission strategy (a), SPEC.md §4.2
             MinContext: EstimateTokens(history));
-        var ctx = new RoutingContext(history, requires, RoutingPolicy.Manual(stickyModel));
-        var choice = await _router.SelectModelAsync(ctx, ct);
+
+        // Effective policy: explicit request (UI: node override ?? session default),
+        // else the graph's persisted session default, else manual large.
+        var effective = requestedPolicy ?? graph.DefaultPolicy ?? RoutingPolicy.Manual(DefaultModel);
+        var canonical = Canonical(effective);
+
+        // Branch-level stickiness (§4.1): keep the branch's model unless the policy
+        // changed or the sticky model can no longer meet `requires` (e.g. now needs
+        // vision). Manual policies skip stickiness — the model is explicit and wins.
+        var (branchModel, branchProvider, branchPolicyCanon) = NearestAssistantRouting(graph, fromNodeId);
+        ModelChoice choice;
+        if (effective.Kind == "auto"
+            && branchModel is not null
+            && branchPolicyCanon == canonical
+            && CanReuse(branchProvider ?? _registry.DefaultProviderId, branchModel, requires))
+        {
+            choice = new ModelChoice(branchModel, branchProvider ?? _registry.DefaultProviderId,
+                $"{canonical}: sticky branch model ({branchModel})");
+        }
+        else
+        {
+            choice = await _router.SelectModelAsync(new RoutingContext(history, requires, effective), ct);
+        }
 
         // 5. Call the model, measuring latency.
         var sw = Stopwatch.StartNew();
@@ -89,12 +108,12 @@ public sealed class ConversationService
         // 6. Resolve OG images for any link cards (server-side, spec P0).
         await _linkCards.EnrichAsync(result.Blocks, ct);
 
-        // 7. Cost + telemetry.
-        var cost = _registry.EstimateCostUsd(choice.ModelId, result.TokensIn, result.TokensOut);
+        // 7. Cost + telemetry (real policy/reason; telemetry schema unchanged).
+        var cost = _registry.EstimateCostUsd(choice.ProviderId, choice.ModelId, result.TokensIn, result.TokensOut);
         _telemetry.Record(new TelemetryRecord(
             DateTimeOffset.UtcNow.ToString("o"), graphId, assistantId,
             choice.ModelId, choice.ProviderId, result.TokensIn, result.TokensOut,
-            cost, sw.ElapsedMilliseconds, ctx.Policy.Kind, choice.Reason));
+            cost, sw.ElapsedMilliseconds, canonical, choice.Reason));
 
         // 8. Persist and emit the assistant node as a child of the user node.
         var assistantNode = new Node
@@ -114,25 +133,35 @@ public sealed class ConversationService
                 CostUsd = cost,
                 LatencyMs = sw.ElapsedMilliseconds,
                 Reason = choice.Reason,
+                Policy = canonical,
             },
         };
         _store.AddNode(graphId, assistantNode);
         await emit(new TurnCompletedServerEvent { Node = assistantNode });
     }
 
-    // The model of the nearest assistant node on the path to the root, if any —
-    // used to keep a branch sticky to its model.
-    private static string? NearestAssistantModel(Graph graph, string? fromNodeId)
+    private static string Canonical(RoutingPolicy? p) =>
+        p is null ? "" : p.Kind == "manual" ? $"manual:{p.ModelId}" : $"auto:{p.Objective}";
+
+    // The nearest assistant node's (model, providerId, canonical policy) on the
+    // path to root.
+    private static (string? Model, string? Provider, string? PolicyCanon) NearestAssistantRouting(Graph graph, string? fromNodeId)
     {
         var byId = graph.Nodes.ToDictionary(n => n.Id);
         var cursor = fromNodeId;
         while (cursor is not null && byId.TryGetValue(cursor, out var node))
         {
             if (node.Role == "assistant" && !string.IsNullOrEmpty(node.Meta?.Model))
-                return node.Meta!.Model;
+                return (node.Meta!.Model, node.Meta.ProviderId, node.Meta.Policy);
             cursor = node.ParentId;
         }
-        return null;
+        return (null, null, null);
+    }
+
+    private bool CanReuse(string providerId, string modelId, RequestRequirements requires)
+    {
+        var meta = _registry.GetMetadata(providerId, modelId);
+        return meta is null || ManualRouter.Unmet(meta, requires).Count == 0;
     }
 
     // Cheap pre-call token estimate (~4 chars/token) for the minContext guardrail.

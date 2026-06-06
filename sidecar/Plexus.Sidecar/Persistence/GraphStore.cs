@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Plexus.Sidecar.Contract;
+using Plexus.Sidecar.Routing;
 using Plexus.Sidecar.Services;
 
 namespace Plexus.Sidecar.Persistence;
@@ -41,7 +42,8 @@ public sealed class GraphStore
             CREATE TABLE IF NOT EXISTS graphs (
                 id          TEXT PRIMARY KEY,
                 title       TEXT,
-                created_at  TEXT NOT NULL
+                created_at  TEXT NOT NULL,
+                policy_json TEXT
             );
             CREATE TABLE IF NOT EXISTS nodes (
                 id          TEXT PRIMARY KEY,
@@ -56,6 +58,12 @@ public sealed class GraphStore
             CREATE INDEX IF NOT EXISTS idx_nodes_graph ON nodes(graph_id);
             """;
         cmd.ExecuteNonQuery();
+
+        // Migration for DBs created before R1: add policy_json if missing.
+        using var migrate = conn.CreateCommand();
+        migrate.CommandText = "ALTER TABLE graphs ADD COLUMN policy_json TEXT;";
+        try { migrate.ExecuteNonQuery(); }
+        catch (SqliteException) { /* column already exists */ }
     }
 
     public List<GraphSummary> ListGraphs()
@@ -91,15 +99,29 @@ public sealed class GraphStore
         {
             Id = Guid.NewGuid().ToString("n"),
             Title = title,
+            // Default session policy: manual on the large model (preserves R0
+            // behaviour); the user can switch to an auto policy in the UI.
+            DefaultPolicy = RoutingPolicy.Manual("claude-opus-4-8"),
         };
         using var conn = Open();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "INSERT INTO graphs (id, title, created_at) VALUES ($id, $title, $createdAt);";
+        cmd.CommandText = "INSERT INTO graphs (id, title, created_at, policy_json) VALUES ($id, $title, $createdAt, $policy);";
         cmd.Parameters.AddWithValue("$id", graph.Id);
         cmd.Parameters.AddWithValue("$title", (object?)graph.Title ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$createdAt", DateTimeOffset.UtcNow.ToString("o"));
+        cmd.Parameters.AddWithValue("$policy", Json.Serialize(graph.DefaultPolicy));
         cmd.ExecuteNonQuery();
         return graph;
+    }
+
+    public void SetGraphPolicy(string graphId, RoutingPolicy policy)
+    {
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "UPDATE graphs SET policy_json = $policy WHERE id = $id;";
+        cmd.Parameters.AddWithValue("$policy", Json.Serialize(policy));
+        cmd.Parameters.AddWithValue("$id", graphId);
+        cmd.ExecuteNonQuery();
     }
 
     public Graph? LoadGraph(string graphId)
@@ -107,17 +129,20 @@ public sealed class GraphStore
         using var conn = Open();
 
         string? title;
+        RoutingPolicy? policy = null;
         using (var gcmd = conn.CreateCommand())
         {
-            gcmd.CommandText = "SELECT title FROM graphs WHERE id = $id;";
+            gcmd.CommandText = "SELECT title, policy_json FROM graphs WHERE id = $id;";
             gcmd.Parameters.AddWithValue("$id", graphId);
             using var greader = gcmd.ExecuteReader();
             if (!greader.Read())
                 return null;
             title = greader.IsDBNull(0) ? null : greader.GetString(0);
+            if (!greader.IsDBNull(1))
+                policy = Json.Deserialize<RoutingPolicy>(greader.GetString(1));
         }
 
-        var graph = new Graph { Id = graphId, Title = title };
+        var graph = new Graph { Id = graphId, Title = title, DefaultPolicy = policy };
 
         using (var ncmd = conn.CreateCommand())
         {

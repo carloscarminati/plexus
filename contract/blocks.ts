@@ -88,6 +88,7 @@ export interface Node {
     costUsd?: number; // estimated $ for this turn (from the registry)
     latencyMs?: number;
     reason?: string; // why this model was picked (router)
+    policy?: string; // canonical effective policy ("auto:cost", "manual:<id>")
   };
 }
 
@@ -96,6 +97,27 @@ export interface Graph {
   title?: string;
   nodes: Node[];
   edges: { from: string; to: string }[]; // parent -> child, derivable from parentId
+  defaultPolicy?: RoutingPolicy; // session default routing policy (R1)
+}
+
+// ── Model routing (R1) — see SPEC-model-routing.md ──────────────────────────
+
+export type RoutingObjective = "cost" | "quality" | "balanced";
+
+export type RoutingPolicy =
+  | { kind: "manual"; modelId: string }
+  | { kind: "auto"; objective: RoutingObjective; budgetPerTurn?: number };
+
+// One curated candidate model (NOT the full models.dev catalog) for the picker.
+export interface ModelInfo {
+  id: string;
+  providerId: string;
+  tier: "small" | "mid" | "large";
+  costInPerMTok: number;
+  costOutPerMTok: number;
+  contextWindow: number;
+  toolCall: boolean;
+  vision: boolean;
 }
 
 // ── Transport (local WebSocket: sidecar <-> frontend) ───────────────────────
@@ -106,9 +128,14 @@ export type ClientEvent =
   | { type: "list_graphs" }
   | { type: "new_graph"; title?: string }
   // fromNodeId null = start of a fresh graph; otherwise resume/branch from that node.
-  | { type: "send_message"; graphId: string; fromNodeId: string | null; text: string }
+  // policy = the resolved routing policy (per-node override ?? session default).
+  | { type: "send_message"; graphId: string; fromNodeId: string | null; text: string; policy?: RoutingPolicy }
   // P1 — a `choices`/`mcp_ui` block fired an interactive intent.
-  | { type: "intent"; graphId: string; nodeId: string; kind: string; payload: unknown };
+  | { type: "intent"; graphId: string; nodeId: string; kind: string; payload: unknown; policy?: RoutingPolicy }
+  // R1 — persist the session default routing policy.
+  | { type: "set_session_policy"; graphId: string; policy: RoutingPolicy }
+  // R1 — request the curated candidate set.
+  | { type: "list_models" };
 
 export type ServerEvent =
   | { type: "graphs"; graphs: { id: string; title?: string }[] }
@@ -118,4 +145,6 @@ export type ServerEvent =
   // Progressive rendering (P1): partial blocks as the model emits them.
   | { type: "turn_delta"; nodeId: string; blocks: Block[] }
   | { type: "turn_completed"; node: Node }
+  // R1 — the curated candidate models for the Manual picker.
+  | { type: "models"; models: ModelInfo[] }
   | { type: "error"; message: string };

@@ -1,12 +1,27 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { BlockView } from "./blocks/BlockView";
 import { CanvasView } from "./CanvasView";
+import { PolicyPicker } from "./PolicyPicker";
 import { useSidecar } from "./useSidecar";
 import { formatCost } from "./format";
 import "./App.css";
 
 function App() {
-  const { status, graph, pending, error, selectedId, select, sendMessage, sendChoice } = useSidecar();
+  const {
+    status,
+    graph,
+    pending,
+    error,
+    selectedId,
+    select,
+    models,
+    sessionPolicy,
+    setSessionPolicy,
+    nodeOverrides,
+    setNodeOverride,
+    sendMessage,
+    sendChoice,
+  } = useSidecar();
   const [draft, setDraft] = useState("");
   const detailRef = useRef<HTMLDivElement>(null);
 
@@ -32,7 +47,15 @@ function App() {
     <div className="app">
       <header className="topbar">
         <div className="brand">Plexus</div>
-        <div className={`status status-${status}`}>{status}</div>
+        <div className="topbar-right">
+          <PolicyPicker
+            label="Routing"
+            value={sessionPolicy}
+            onChange={(p) => p && setSessionPolicy(p)}
+            models={models}
+          />
+          <div className={`status status-${status}`}>{status}</div>
+        </div>
       </header>
 
       <div className="workspace">
@@ -59,6 +82,16 @@ function App() {
                       {selected.meta.latencyMs != null && ` · ${(selected.meta.latencyMs / 1000).toFixed(1)}s`}
                     </span>
                   )}
+                </div>
+                <div className="branch-policy">
+                  <PolicyPicker
+                    label="Branch from here"
+                    value={nodeOverrides[selected.id] ?? null}
+                    onChange={(p) => setNodeOverride(selected.id, p)}
+                    models={models}
+                    allowInherit
+                  />
+                  {selected.meta?.reason && <span className="branch-reason">{selected.meta.reason}</span>}
                 </div>
                 <div className="detail-blocks">
                   {selected.blocks.map((block, i) => (

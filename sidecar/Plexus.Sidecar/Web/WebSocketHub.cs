@@ -4,6 +4,7 @@ using System.Text.Json;
 using Plexus.Sidecar.Contract;
 using Plexus.Sidecar.Model;
 using Plexus.Sidecar.Persistence;
+using Plexus.Sidecar.Routing;
 using Plexus.Sidecar.Services;
 
 namespace Plexus.Sidecar.Web;
@@ -17,13 +18,15 @@ public sealed class WebSocketHub
     private readonly SemaphoreSlim _sendLock = new(1, 1);
     private readonly GraphStore _store;
     private readonly ConversationService? _conversation;
+    private readonly ModelRegistry _registry;
     private readonly ILogger _log;
 
-    public WebSocketHub(WebSocket socket, GraphStore store, ConversationService? conversation, ILogger log)
+    public WebSocketHub(WebSocket socket, GraphStore store, ConversationService? conversation, ModelRegistry registry, ILogger log)
     {
         _socket = socket;
         _store = store;
         _conversation = conversation;
+        _registry = registry;
         _log = log;
     }
 
@@ -91,11 +94,19 @@ public sealed class WebSocketHub
                     });
                     break;
                 }
-                await _conversation.RunTurnAsync(sm.GraphId, sm.FromNodeId, sm.Text, SendAsync, ct);
+                await _conversation.RunTurnAsync(sm.GraphId, sm.FromNodeId, sm.Text, SendAsync, sm.Policy, ct);
                 break;
 
             case IntentEvent intent:
                 await HandleIntentAsync(intent, ct);
+                break;
+
+            case SetSessionPolicyEvent sp:
+                _store.SetGraphPolicy(sp.GraphId, sp.Policy);
+                break;
+
+            case ListModelsEvent:
+                await SendAsync(new ModelsServerEvent { Models = CuratedModels() });
                 break;
         }
     }
@@ -122,12 +133,27 @@ public sealed class WebSocketHub
                 return;
             }
             // Branch from the node that showed the choices.
-            await _conversation.RunTurnAsync(intent.GraphId, intent.NodeId, text, SendAsync, ct);
+            await _conversation.RunTurnAsync(intent.GraphId, intent.NodeId, text, SendAsync, intent.Policy, ct);
             return;
         }
 
         await SendAsync(new ErrorServerEvent { Message = $"Unknown intent kind: {intent.Kind}" });
     }
+
+    // The curated candidate set (NOT the full models.dev catalog) for the
+    // Manual model picker, with metadata for display.
+    private List<ModelInfo> CuratedModels() =>
+        CandidateSet.Build(_registry).Select(c => new ModelInfo
+        {
+            Id = c.ModelId,
+            ProviderId = c.ProviderId,
+            Tier = c.Tier.ToString().ToLowerInvariant(),
+            CostInPerMTok = c.Meta?.CostInPerMTok ?? 0,
+            CostOutPerMTok = c.Meta?.CostOutPerMTok ?? 0,
+            ContextWindow = c.Meta?.ContextWindow ?? 0,
+            ToolCall = c.Meta?.ToolCall ?? false,
+            Vision = c.Meta?.Vision ?? false,
+        }).ToList();
 
     private static string? TryGetString(System.Text.Json.JsonElement payload, string key)
     {
