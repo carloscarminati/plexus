@@ -1,5 +1,6 @@
 using Plexus.Sidecar.Model;
 using Plexus.Sidecar.Persistence;
+using Plexus.Sidecar.Routing;
 using Plexus.Sidecar.Services;
 using Plexus.Sidecar.Web;
 
@@ -10,6 +11,18 @@ builder.WebHost.UseUrls("http://127.0.0.1:8765");
 
 builder.Services.AddSingleton<GraphStore>(_ => new GraphStore());
 builder.Services.AddHttpClient<LinkCardResolver>();
+
+// Model routing (R0): registry (models.dev), the routing seam, telemetry. These
+// run regardless of whether a conversation key is present. The registry is a
+// singleton so the scheduled refresh and the turn path share loaded metadata.
+builder.Services.AddHttpClient();
+builder.Services.AddSingleton<ModelRegistry>(sp => new ModelRegistry(
+    sp.GetRequiredService<IHttpClientFactory>().CreateClient(),
+    sp.GetRequiredService<ILogger<ModelRegistry>>()));
+builder.Services.AddSingleton<IModelRouter, ManualRouter>();
+builder.Services.AddSingleton<ITelemetrySink>(sp =>
+    new SqliteTelemetrySink(sp.GetRequiredService<ILogger<SqliteTelemetrySink>>()));
+builder.Services.AddHostedService<RegistryRefreshService>();
 
 // Resolve the API key once at startup; it never leaves the sidecar. Conversation
 // services are only registered when a key is present — without one the app still

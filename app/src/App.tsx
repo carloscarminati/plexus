@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { BlockView } from "./blocks/BlockView";
 import { CanvasView } from "./CanvasView";
 import { useSidecar } from "./useSidecar";
+import { formatCost } from "./format";
 import "./App.css";
 
 function App() {
@@ -49,9 +50,13 @@ function App() {
               <>
                 <div className="detail-head">
                   <span className="detail-role">{selected.role}</span>
-                  {selected.meta?.tokensOut != null && (
-                    <span className="detail-meta">
-                      {selected.meta.model} · {selected.meta.tokensIn ?? "?"}→{selected.meta.tokensOut} tok
+                  {selected.meta?.model && (
+                    <span className="detail-meta" title={selected.meta.reason ?? undefined}>
+                      {selected.meta.model}
+                      {selected.meta.costUsd != null && ` · ${formatCost(selected.meta.costUsd)}`}
+                      {selected.meta.tokensOut != null &&
+                        ` · ${selected.meta.tokensIn ?? "?"}→${selected.meta.tokensOut} tok`}
+                      {selected.meta.latencyMs != null && ` · ${(selected.meta.latencyMs / 1000).toFixed(1)}s`}
                     </span>
                   )}
                 </div>

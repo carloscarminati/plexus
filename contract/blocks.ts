@@ -80,7 +80,15 @@ export interface Node {
   createdAt: string; // ISO; used to order reconstructed history
   blocks: Block[]; // for user turns this is usually one markdown block
   raw: string; // the model's original text — re-fed verbatim on resume
-  meta?: { model?: string; tokensIn?: number; tokensOut?: number };
+  meta?: {
+    model?: string;
+    providerId?: string;
+    tokensIn?: number;
+    tokensOut?: number;
+    costUsd?: number; // estimated $ for this turn (from the registry)
+    latencyMs?: number;
+    reason?: string; // why this model was picked (router)
+  };
 }
 
 export interface Graph {

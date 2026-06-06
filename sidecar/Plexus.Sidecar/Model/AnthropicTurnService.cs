@@ -11,7 +11,7 @@ namespace Plexus.Sidecar.Model;
 
 public sealed record TurnRequest(IReadOnlyList<(string Role, string Content)> History);
 
-public sealed record TurnResult(List<Block> Blocks, string Raw, string Model, int? TokensIn, int? TokensOut);
+public sealed record TurnResult(List<Block> Blocks, string Raw, int? TokensIn, int? TokensOut);
 
 // Strategy (a): ask the model for typed blocks via the system prompt, parse and
 // validate the JSON. On any parse/validation failure we fall back to strategy
@@ -23,7 +23,6 @@ public sealed record TurnResult(List<Block> Blocks, string Raw, string Model, in
 // hardening pass can move this to a constrained tool / structured output.
 public sealed class AnthropicTurnService
 {
-    private const string ModelId = "claude-opus-4-8";
     private readonly AnthropicClient _client;
 
     public AnthropicTurnService(string apiKey)
@@ -31,7 +30,8 @@ public sealed class AnthropicTurnService
         _client = new AnthropicClient { ApiKey = apiKey };
     }
 
-    public async Task<TurnResult> CompleteAsync(TurnRequest request, CancellationToken ct = default)
+    // The model is chosen by the router (see ConversationService) and passed in.
+    public async Task<TurnResult> CompleteAsync(TurnRequest request, string modelId, CancellationToken ct = default)
     {
         // Prompt-prefix caching (spec P1): cache the stable system prompt, and the
         // tail of the shared ancestor prefix. The last history entry is the new,
@@ -59,7 +59,7 @@ public sealed class AnthropicTurnService
 
         var parameters = new MessageCreateParams
         {
-            Model = ModelId,
+            Model = modelId,
             MaxTokens = 16000,
             System = new List<TextBlockParam>
             {
@@ -87,7 +87,7 @@ public sealed class AnthropicTurnService
         int? tokensIn = response.Usage is { } u ? (int)u.InputTokens : null;
         int? tokensOut = response.Usage is { } u2 ? (int)u2.OutputTokens : null;
 
-        return new TurnResult(blocks, raw, ModelId, tokensIn, tokensOut);
+        return new TurnResult(blocks, raw, tokensIn, tokensOut);
     }
 
     // Try strategy (a): parse the JSON {"blocks":[...]}. Fall back to (b).

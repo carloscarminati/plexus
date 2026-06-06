@@ -13,6 +13,7 @@ import {
 import "@xyflow/react/dist/style.css";
 import type { Block, Graph } from "./contract";
 import type { Pending } from "./useSidecar";
+import { formatCost, shortModel } from "./format";
 
 const NODE_W = 240;
 const NODE_H = 96;
@@ -21,6 +22,8 @@ interface CardData extends Record<string, unknown> {
   role: string;
   preview: string;
   types: string[];
+  badge?: string; // model + cost, for assistant nodes
+  reason?: string;
   thinking?: boolean;
   selected?: boolean;
 }
@@ -29,7 +32,14 @@ function NodeCard({ data }: NodeProps<Node<CardData>>) {
   return (
     <div className={`canvas-card card-${data.role} ${data.selected ? "card-selected" : ""}`}>
       <Handle type="target" position={Position.Top} />
-      <div className="card-role">{data.role}</div>
+      <div className="card-head">
+        <span className="card-role">{data.role}</span>
+        {data.badge && (
+          <span className="card-badge" title={data.reason}>
+            {data.badge}
+          </span>
+        )}
+      </div>
       {data.thinking ? (
         <div className="thinking">
           <span></span>
@@ -76,6 +86,12 @@ function previewOf(blocks: Block[]): string {
   }
 }
 
+function badgeOf(meta: { model?: string; costUsd?: number } | undefined): string | undefined {
+  if (!meta?.model) return undefined;
+  const cost = meta.costUsd != null ? ` · ${formatCost(meta.costUsd)}` : "";
+  return `${shortModel(meta.model)}${cost}`;
+}
+
 export function CanvasView({
   graph,
   selectedId,
@@ -97,6 +113,8 @@ export function CanvasView({
       preview: previewOf(n.blocks),
       types: n.blocks.map((b) => b.type),
       parentId: n.parentId,
+      badge: badgeOf(n.meta),
+      reason: n.meta?.reason,
     }));
     // Live "thinking" node for the in-flight turn.
     if (pending && !graph.nodes.some((n) => n.id === pending.nodeId)) {
@@ -106,6 +124,8 @@ export function CanvasView({
         preview: "",
         types: [],
         parentId: pending.parentId,
+        badge: undefined,
+        reason: undefined,
       });
     }
 
@@ -129,6 +149,8 @@ export function CanvasView({
           role: c.role,
           preview: c.preview,
           types: c.types,
+          badge: c.badge,
+          reason: c.reason,
           thinking: pending?.nodeId === c.id,
           selected: selectedId === c.id,
         },

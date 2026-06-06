@@ -2,26 +2,30 @@ using System.Diagnostics;
 
 namespace Plexus.Sidecar.Services;
 
-// Resolves the Anthropic API key. The key must never reach the renderer — only
-// the sidecar reads it. Preference order:
-//   1. macOS keychain  (security find-generic-password -s plexus-anthropic-key)
-//   2. ANTHROPIC_API_KEY environment variable
+// Resolves provider API keys. Keys must never reach the renderer — only the
+// sidecar reads them. They live in the OS keychain, referenced by provider id
+// (service "plexus-{providerId}-key"). Per-provider env fallback:
+// {PROVIDERID}_API_KEY (e.g. ANTHROPIC_API_KEY). Preference: keychain, then env.
 public sealed class KeychainService
 {
-    private const string Service = "plexus-anthropic-key";
     private const string Account = "plexus";
 
-    public string? GetAnthropicKey()
+    public string? GetKey(string providerId)
     {
-        var fromKeychain = ReadMacKeychain();
+        var service = $"plexus-{providerId}-key";
+        var fromKeychain = ReadMacKeychain(service);
         if (!string.IsNullOrWhiteSpace(fromKeychain))
             return fromKeychain.Trim();
 
-        var fromEnv = Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY");
+        var envVar = $"{providerId.ToUpperInvariant()}_API_KEY";
+        var fromEnv = Environment.GetEnvironmentVariable(envVar);
         return string.IsNullOrWhiteSpace(fromEnv) ? null : fromEnv.Trim();
     }
 
-    private static string? ReadMacKeychain()
+    // Convenience for the R0 single-provider path.
+    public string? GetAnthropicKey() => GetKey("anthropic");
+
+    private static string? ReadMacKeychain(string service)
     {
         if (!OperatingSystem.IsMacOS())
             return null;
@@ -39,7 +43,7 @@ public sealed class KeychainService
             psi.ArgumentList.Add("-a");
             psi.ArgumentList.Add(Account);
             psi.ArgumentList.Add("-s");
-            psi.ArgumentList.Add(Service);
+            psi.ArgumentList.Add(service);
             psi.ArgumentList.Add("-w"); // print only the password to stdout
 
             using var proc = Process.Start(psi);

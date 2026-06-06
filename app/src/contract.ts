@@ -67,7 +67,15 @@ export interface Node {
   createdAt: string;
   blocks: Block[];
   raw: string;
-  meta?: { model?: string; tokensIn?: number; tokensOut?: number };
+  meta?: {
+    model?: string;
+    providerId?: string;
+    tokensIn?: number;
+    tokensOut?: number;
+    costUsd?: number;
+    latencyMs?: number;
+    reason?: string;
+  };
 }
 
 export interface Graph {

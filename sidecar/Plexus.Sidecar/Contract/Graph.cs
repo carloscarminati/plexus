@@ -16,8 +16,12 @@ public sealed class Node
 public sealed class NodeMeta
 {
     public string? Model { get; set; }
+    public string? ProviderId { get; set; }
     public int? TokensIn { get; set; }
     public int? TokensOut { get; set; }
+    public double? CostUsd { get; set; }
+    public long? LatencyMs { get; set; }
+    public string? Reason { get; set; } // why this model was picked (router)
 }
 
 public sealed class Edge

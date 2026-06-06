@@ -57,6 +57,29 @@ The ancestor-walk resume mechanic (spec §4.4) is already implemented (`Model/Co
 
 Intent round-trip: a `choices` click sends `{nodeId, kind:"choice", payload:{id,label}}`; the sidecar injects the chosen label as a new user message branching from `nodeId` (`WebSocketHub.HandleIntentAsync`).
 
+## Model routing (R0) — see [SPEC-model-routing.md](../SPEC-model-routing.md)
+
+`sidecar/Plexus.Sidecar/Routing/`:
+
+- **Registry** (`ModelRegistry`) — provider configs (`~/.plexus/providers.json`, default Anthropic) × model metadata pulled from [models.dev](https://models.dev) (`api.json`), cached at `~/.plexus/models.json` and refreshed daily by `RegistryRefreshService`. Pricing/capabilities are never hand-maintained; a thin fallback table covers current Anthropic models not yet listed.
+- **Routing seam** (`IModelRouter`) — `RoutingContext` (messages + `requires` + `policy`) → `ModelChoice`. `ManualRouter` returns the chosen model and runs the capability filter as a guardrail (warns in `reason` if the model can't meet `requires`). `HeuristicRouter`/`LearnedRouter` slot in behind the same interface (R1/R2).
+- **Telemetry** (`SqliteTelemetrySink`) — every call logs and persists `{modelId, providerId, tokensIn, tokensOut, costUsd, latencyMs, policy, reason}` to a `telemetry` table. This is the data R1 needs before auto-routing can be validated.
+- **Branch-level routing** (§4.1) — a turn inherits the model of the nearest assistant ancestor, so a branch stays sticky to its model and keeps its prompt cache.
+- API keys are keychain-resolved per provider (`KeychainService.GetKey(providerId)` → `plexus-{providerId}-key`).
+
+The chosen model + cost + latency + reason are stored in `node.meta` and shown as a badge on each canvas card and in the detail pane. Execution is still Anthropic-only; multi-provider dispatch (each provider an `IChatClient`) is R1.
+
+### R0 status
+
+| R0 acceptance criterion | Status |
+| --- | --- |
+| Providers configurable; API keys in keychain by provider id | done |
+| Model metadata pulled + cached from models.dev; scheduled refresh | done (7400+ models) |
+| `IModelRouter` exists; `ManualRouter` implemented | done |
+| Per-session default + per-node model; choice stored in `node.meta` | done (branch-sticky default; per-node override is the data path — UI selector is a follow-up) |
+| Telemetry per call `{model, provider, tokensIn/out, cost, latencyMs, policy, reason}` | done (log + SQLite) |
+| Each node displays a model badge + cost | done |
+
 ## Caveat for later
 
 The app currently relies on reflection-based `System.Text.Json`. If we ever trim/AOT the sidecar, the polymorphic block serialization needs source-generated `JsonSerializerContext`.
