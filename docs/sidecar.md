@@ -45,6 +45,18 @@ A turn: `send_message {graphId, fromNodeId, text}` →
 
 The ancestor-walk resume mechanic (spec §4.4) is already implemented (`Model/ConversationService.BuildHistory`), so branching/resume (P1) has its foundation.
 
+## Spec → implementation status (P1)
+
+| P1 acceptance criterion | Status |
+| --- | --- |
+| Conversation renders as a tree on a React Flow canvas with edges | done (`app/src/CanvasView.tsx`, dagre layout) |
+| Branch: pick any node, send a message, get a new child node | done (select node → compose; tree forks) |
+| Resume-from-node reconstructs context (§4.4) | done (`ConversationService.BuildHistory`) |
+| Add `chart` and `choices` blocks (incl. intent round-trip) | done (SVG chart renderer; choices click → `intent` → sidecar branches from that node) |
+| Prompt-prefix caching enabled | done — `cache_control` on the system prompt + the shared-ancestor prefix breakpoint. Hits only above the model's min cacheable prefix (4096 tok on Opus 4.8), so short conversations log `cacheRead=0`; longer ones reuse the prefix across sibling branches. |
+
+Intent round-trip: a `choices` click sends `{nodeId, kind:"choice", payload:{id,label}}`; the sidecar injects the chosen label as a new user message branching from `nodeId` (`WebSocketHub.HandleIntentAsync`).
+
 ## Caveat for later
 
 The app currently relies on reflection-based `System.Text.Json`. If we ever trim/AOT the sidecar, the polymorphic block serialization needs source-generated `JsonSerializerContext`.

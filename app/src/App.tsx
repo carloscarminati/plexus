@@ -1,29 +1,31 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { BlockView } from "./blocks/BlockView";
+import { CanvasView } from "./CanvasView";
 import { useSidecar } from "./useSidecar";
 import "./App.css";
 
 function App() {
-  const { status, graph, pending, error, sendMessage } = useSidecar();
+  const { status, graph, pending, error, selectedId, select, sendMessage, sendChoice } = useSidecar();
   const [draft, setDraft] = useState("");
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const detailRef = useRef<HTMLDivElement>(null);
+
+  const nodes = graph?.nodes ?? [];
+  const selected = nodes.find((n) => n.id === selectedId) ?? null;
+  const branching = selectedId != null && nodes.some((n) => n.parentId === selectedId);
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-  }, [graph?.nodes.length, pending]);
+    detailRef.current?.scrollTo({ top: detailRef.current.scrollHeight });
+  }, [selectedId, selected?.blocks.length]);
 
   const doSend = () => {
     if (!draft.trim() || pending) return;
     sendMessage(draft);
     setDraft("");
   };
-
   const submit = (e: FormEvent) => {
     e.preventDefault();
     doSend();
   };
-
-  const nodes = graph?.nodes ?? [];
 
   return (
     <div className="app">
@@ -32,61 +34,78 @@ function App() {
         <div className={`status status-${status}`}>{status}</div>
       </header>
 
-      <div className="conversation" ref={scrollRef}>
-        {nodes.length === 0 && !pending && (
-          <div className="empty">Ask anything — answers render as typed blocks.</div>
-        )}
+      <div className="workspace">
+        <div className="canvas-pane">
+          {graph && nodes.length > 0 ? (
+            <CanvasView graph={graph} selectedId={selectedId} pending={pending} onSelect={select} />
+          ) : (
+            <div className="empty">Send a message to start the graph.</div>
+          )}
+        </div>
 
-        {nodes.map((node) => (
-          <div key={node.id} className={`turn turn-${node.role}`}>
-            <div className="turn-role">{node.role}</div>
-            <div className="turn-body">
-              {node.blocks.map((block, i) => (
-                <BlockView key={i} block={block} />
-              ))}
-            </div>
-            {node.meta?.tokensOut != null && (
-              <div className="turn-meta">
-                {node.meta.model} · {node.meta.tokensIn ?? "?"}→{node.meta.tokensOut} tok
-              </div>
+        <aside className="detail-pane">
+          <div className="detail-scroll" ref={detailRef}>
+            {selected ? (
+              <>
+                <div className="detail-head">
+                  <span className="detail-role">{selected.role}</span>
+                  {selected.meta?.tokensOut != null && (
+                    <span className="detail-meta">
+                      {selected.meta.model} · {selected.meta.tokensIn ?? "?"}→{selected.meta.tokensOut} tok
+                    </span>
+                  )}
+                </div>
+                <div className="detail-blocks">
+                  {selected.blocks.map((block, i) => (
+                    <BlockView
+                      key={i}
+                      block={block}
+                      onChoice={
+                        selected.role === "assistant"
+                          ? (opt) => sendChoice(selected.id, opt)
+                          : undefined
+                      }
+                    />
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div className="empty small">Select a node, or send a message to begin.</div>
             )}
           </div>
-        ))}
 
-        {pending && (
-          <div className="turn turn-assistant">
-            <div className="turn-role">assistant</div>
-            <div className="turn-body">
-              <div className="thinking">
-                <span></span>
-                <span></span>
-                <span></span>
-              </div>
+          {error && <div className="error-bar">{error}</div>}
+
+          <form className="composer" onSubmit={submit}>
+            {branching && <div className="branch-hint">↳ branching from the selected {selected?.role} node</div>}
+            <div className="composer-row">
+              <textarea
+                autoFocus
+                value={draft}
+                onChange={(e) => setDraft(e.currentTarget.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    doSend();
+                  }
+                }}
+                placeholder={
+                  status !== "online"
+                    ? "Connecting to sidecar…"
+                    : selected
+                      ? `Reply from this ${selected.role} node…`
+                      : "Send a message…"
+                }
+                disabled={status !== "online"}
+                rows={3}
+              />
+              <button type="submit" disabled={status !== "online" || !!pending || !draft.trim()}>
+                {pending ? "…" : "Send"}
+              </button>
             </div>
-          </div>
-        )}
+          </form>
+        </aside>
       </div>
-
-      {error && <div className="error-bar">{error}</div>}
-
-      <form className="composer" onSubmit={submit}>
-        <textarea
-          value={draft}
-          onChange={(e) => setDraft(e.currentTarget.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              doSend();
-            }
-          }}
-          placeholder={status === "online" ? "Send a message…" : "Connecting to sidecar…"}
-          disabled={status !== "online"}
-          rows={2}
-        />
-        <button type="submit" disabled={status !== "online" || !!pending || !draft.trim()}>
-          Send
-        </button>
-      </form>
     </div>
   );
 }

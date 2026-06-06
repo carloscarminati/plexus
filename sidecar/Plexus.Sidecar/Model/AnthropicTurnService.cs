@@ -33,25 +33,51 @@ public sealed class AnthropicTurnService
 
     public async Task<TurnResult> CompleteAsync(TurnRequest request, CancellationToken ct = default)
     {
-        var messages = request.History
-            .Select(turn => new MessageParam
-            {
-                Role = turn.Role == "assistant" ? Role.Assistant : Role.User,
-                Content = turn.Content,
-            })
-            .ToList();
+        // Prompt-prefix caching (spec P1): cache the stable system prompt, and the
+        // tail of the shared ancestor prefix. The last history entry is the new,
+        // divergent user message — so the cache breakpoint goes on the entry before
+        // it (Count-2). Sibling branches share that prefix and read it from cache.
+        var history = request.History;
+        var breakpoint = history.Count - 2; // -1 when there's nothing to cache yet
+
+        var messages = new List<MessageParam>(history.Count);
+        for (var i = 0; i < history.Count; i++)
+        {
+            var (role, content) = history[i];
+            var roleEnum = role == "assistant" ? Role.Assistant : Role.User;
+            messages.Add(i == breakpoint
+                ? new MessageParam
+                {
+                    Role = roleEnum,
+                    Content = new List<ContentBlockParam>
+                    {
+                        new TextBlockParam { Text = content, CacheControl = new CacheControlEphemeral() },
+                    },
+                }
+                : new MessageParam { Role = roleEnum, Content = content });
+        }
 
         var parameters = new MessageCreateParams
         {
             Model = ModelId,
             MaxTokens = 16000,
-            System = SystemPrompt.Text,
+            System = new List<TextBlockParam>
+            {
+                new() { Text = SystemPrompt.Text, CacheControl = new CacheControlEphemeral() },
+            },
             Thinking = new ThinkingConfigAdaptive(),
             OutputConfig = new OutputConfig { Effort = Effort.High },
             Messages = messages,
         };
 
         var response = await _client.Messages.Create(parameters, cancellationToken: ct);
+
+        if (response.Usage is { } usage)
+        {
+            Console.WriteLine(
+                $"[plexus] tokens in={usage.InputTokens} out={usage.OutputTokens} " +
+                $"cacheRead={usage.CacheReadInputTokens} cacheWrite={usage.CacheCreationInputTokens}");
+        }
 
         var raw = string.Concat(
             response.Content.Select(b => b.Value).OfType<TextBlock>().Select(t => t.Text));

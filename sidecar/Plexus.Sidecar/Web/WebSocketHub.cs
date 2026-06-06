@@ -94,10 +94,48 @@ public sealed class WebSocketHub
                 await _conversation.RunTurnAsync(sm.GraphId, sm.FromNodeId, sm.Text, SendAsync, ct);
                 break;
 
-            case IntentEvent:
-                await SendAsync(new ErrorServerEvent { Message = "Interactive intents are not implemented yet (P1)." });
+            case IntentEvent intent:
+                await HandleIntentAsync(intent, ct);
                 break;
         }
+    }
+
+    // An interactive block (currently `choices`) fired. The sidecar — not the
+    // frontend — decides the next turn: we inject the chosen option as a new user
+    // message and continue from the node that showed it (spec §4.4).
+    private async Task HandleIntentAsync(IntentEvent intent, CancellationToken ct)
+    {
+        if (_conversation is null)
+        {
+            await SendAsync(new ErrorServerEvent { Message = "No Anthropic API key configured." });
+            return;
+        }
+
+        if (intent.Kind == "choice")
+        {
+            var text = TryGetString(intent.Payload, "label")
+                ?? TryGetString(intent.Payload, "id")
+                ?? "";
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                await SendAsync(new ErrorServerEvent { Message = "Choice intent missing a label." });
+                return;
+            }
+            // Branch from the node that showed the choices.
+            await _conversation.RunTurnAsync(intent.GraphId, intent.NodeId, text, SendAsync, ct);
+            return;
+        }
+
+        await SendAsync(new ErrorServerEvent { Message = $"Unknown intent kind: {intent.Kind}" });
+    }
+
+    private static string? TryGetString(System.Text.Json.JsonElement payload, string key)
+    {
+        if (payload.ValueKind == System.Text.Json.JsonValueKind.Object &&
+            payload.TryGetProperty(key, out var prop) &&
+            prop.ValueKind == System.Text.Json.JsonValueKind.String)
+            return prop.GetString();
+        return null;
     }
 
     private async Task SendAsync(ServerEvent ev)

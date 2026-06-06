@@ -30,6 +30,17 @@ public static class SystemPrompt
 
           { "type": "code", "language": "<lang>", "code": "<source>", "filename": "<optional>" }
 
+          { "type": "chart", "chart": "line|bar|scatter",
+            "series": [ { "name": "<optional>", "values": [<number>, ...] } ],
+            "xLabels": ["<optional>", ...], "xTitle": "<optional>", "yTitle": "<optional>" }
+            // Use for numeric series worth visualizing. All series share xLabels.
+
+          { "type": "choices", "prompt": "<optional>",
+            "options": [ { "id": "<short-id>", "label": "<button text>" } ] }
+            // Offer a SMALL set of next actions. When the user clicks one, the app
+            // sends its label back as their next message — so write options as the
+            // thing the user would say next. Only use when genuinely offering a choice.
+
         Rules:
         - Output valid JSON and nothing else. No leading or trailing text.
         - Order blocks the way the answer should read top to bottom.
