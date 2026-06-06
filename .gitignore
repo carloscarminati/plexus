@@ -1,0 +1,32 @@
+# --- .NET ---
+bin/
+obj/
+*.user
+.vs/
+
+# --- Node / frontend ---
+node_modules/
+dist/
+dist-ssr/
+.vite/
+*.local
+
+# --- Rust / Tauri ---
+target/
+app/src-tauri/target/
+
+# --- Local data & secrets ---
+*.sqlite
+*.sqlite-journal
+*.db
+.env
+.env.*
+!.env.example
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+
+# --- Editor ---
+.idea/
+*.swp
