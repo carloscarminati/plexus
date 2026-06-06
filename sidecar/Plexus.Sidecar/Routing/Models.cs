@@ -1,6 +1,6 @@
 namespace Plexus.Sidecar.Routing;
 
-// Mirror of contract/SPEC-model-routing.md §1. The registry = user-configured
+// Mirror of docs/spec-model-routing.md §1. The registry = user-configured
 // providers × metadata pulled from models.dev.
 
 public sealed class ProviderConfig

@@ -169,38 +169,46 @@ This is the standard ancestor-walk used by existing canvas chats. The merge case
 
 ## 5. Phases & acceptance criteria
 
-### P0 — Walking skeleton (the milestone that proves the thesis)
-- [ ] Tauri app boots; frontend talks to .NET sidecar over local WebSocket.
-- [ ] API key stored in OS keychain; never present in the renderer.
-- [ ] Single linear conversation works end-to-end against one provider.
-- [ ] Assistant turns render as **blocks** with catalog `{markdown, table, link_card, code}`.
-- [ ] Strategy (a) works for one provider; strategy (b) fallback parser implemented.
-- [ ] `link_card` resolves an OG image server-side.
-- [ ] Graph persists to SQLite and reloads on restart.
+> **Status (reconciled with the implementation at v0.4.0):** P0 ✅, P1 ✅ done.
+> P2 ⏳ planned. Model routing is tracked separately in
+> [spec-model-routing.md](./spec-model-routing.md): R0 ✅, R1 ✅ done; R2 ⏳ (gated).
 
-### P1 — The canvas
-- [ ] Conversation renders as a tree of nodes on a React Flow canvas with edges.
-- [ ] User can branch: pick any node, send a message, get a new child node.
-- [ ] Resume-from-node reconstructs context correctly (section 4.4).
-- [ ] Add `chart` and `choices` blocks (incl. the intent round-trip).
-- [ ] Prompt-prefix caching enabled.
+### P0 — Walking skeleton (the milestone that proves the thesis) — ✅ Done (v0.1.0)
+- [x] Tauri app boots; frontend talks to .NET sidecar over local WebSocket.
+- [x] API key stored in OS keychain; never present in the renderer.
+- [x] Single linear conversation works end-to-end against one provider.
+- [x] Assistant turns render as **blocks** with catalog `{markdown, table, link_card, code}`.
+- [x] Strategy (a) works for one provider; strategy (b) fallback parser implemented. *(a) is implemented as prompt-guided JSON rather than the provider's tool/structured-output mechanism — see Divergences below.*
+- [x] `link_card` resolves an OG image server-side.
+- [x] Graph persists to SQLite and reloads on restart. *(persistence + reload work; there is not yet a UI to reopen a prior graph — see Divergences.)*
 
-### P2 — Reach
+### P1 — The canvas — ✅ Done (v0.2.0)
+- [x] Conversation renders as a tree of nodes on a React Flow canvas with edges.
+- [x] User can branch: pick any node, send a message, get a new child node.
+- [x] Resume-from-node reconstructs context correctly (section 4.4).
+- [x] Add `chart` and `choices` blocks (incl. the intent round-trip).
+- [x] Prompt-prefix caching enabled.
+
+### P2 — Reach — ⏳ Planned
 - [ ] DAG merge: multi-select nodes, union-of-ancestors context.
 - [ ] MCP host (official C# SDK) wired; `mcp_ui` block renders MCP Apps UI resources in a sandboxed iframe.
 - [ ] Optional: migrate the block catalog onto Vercel json-render.
 - [ ] Optional: expose Plexus's own MCP server.
+
+### Divergences from this spec (reported, not silently changed)
+- **Strategy (a) mechanism.** §4.2 prefers the provider's structured-output / tool mechanism; it is implemented as **prompt-guided JSON** because strict structured outputs can't express the open-keyed `table.rows` map. Schema validation + the (b) fallback still apply. *(documented in [sidecar.md](sidecar.md))*
+- **Graph reload UI.** Persistence and `LoadGraph` exist, but the app creates a fresh graph on launch and has no UI to reopen a stored graph yet.
 
 ## 6. Repo setup (first public repo)
 
 Suggested top-level layout:
 
 ```
-/                README.md, LICENSE, CONTRIBUTING.md, SPEC.md, .gitignore
+/                README.md, LICENSE, CONTRIBUTING.md, .gitignore
 /contract        blocks.ts (+ generated JSON Schema)  ← shared source of truth
 /app             Tauri shell + Vite/React frontend
 /sidecar         .NET solution (the brain)
-/docs            architecture notes, screenshots
+/docs            spec.md, spec-model-routing.md, sidecar.md, screenshots
 ```
 
 Open-source hygiene worth doing from day one:

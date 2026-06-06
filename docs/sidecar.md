@@ -57,7 +57,7 @@ The ancestor-walk resume mechanic (spec §4.4) is already implemented (`Model/Co
 
 Intent round-trip: a `choices` click sends `{nodeId, kind:"choice", payload:{id,label}}`; the sidecar injects the chosen label as a new user message branching from `nodeId` (`WebSocketHub.HandleIntentAsync`).
 
-## Model routing (R0) — see [SPEC-model-routing.md](../SPEC-model-routing.md)
+## Model routing (R0) — see [spec-model-routing.md](spec-model-routing.md)
 
 `sidecar/Plexus.Sidecar/Routing/`:
 

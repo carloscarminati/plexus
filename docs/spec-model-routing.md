@@ -1,6 +1,6 @@
 # Plexus — Feature Spec: Model Routing
 
-> **Addendum to [SPEC.md](./SPEC.md).** This is a separate, orthogonal track — it does not depend on P2 (MCP / json-render) and can land before or alongside it.
+> **Addendum to [spec.md](./spec.md).** This is a separate, orthogonal track — it does not depend on P2 (MCP / json-render) and can land before or alongside it.
 >
 > Goal: let the user configure a list of providers/models and choose one **manually** or **automatically by request complexity**, optimizing for cost or efficiency.
 
@@ -59,7 +59,7 @@ export type RoutingPolicy =
   | { kind: "auto"; objective: "cost" | "quality" | "balanced"; budgetPerTurn?: number };
 
 export interface RoutingContext {
-  messages: SerializedTurn[];     // the reconstructed ancestor path (SPEC.md §4.4)
+  messages: SerializedTurn[];     // the reconstructed ancestor path (spec.md §4.4)
   requires: {                     // hard requirements derived from the request
     toolCall?: boolean;
     structuredOutput?: boolean;   // we always need this for block emission strategy (a)
@@ -94,26 +94,29 @@ Each provider is a `Microsoft.Extensions.AI.IChatClient`; the router only decide
 
 ## 3. Phases & acceptance criteria
 
-### R0 — Registry + manual + telemetry (do this now)
-- [ ] Providers configurable; API keys in OS keychain, referenced by provider id.
-- [ ] Model metadata pulled and cached from models.dev; refreshes on a schedule.
-- [ ] `IModelRouter` interface exists; `ManualRouter` implemented.
-- [ ] Per-session default model + per-node override; choice stored in `node.meta`.
-- [ ] **Telemetry**: every call logs `{ modelId, providerId, tokensIn, tokensOut, cost, latencyMs, policy, reason }`.
-- [ ] Each node displays a model badge + its cost.
+### R0 — Registry + manual + telemetry — ✅ Done (v0.3.0)
+- [x] Providers configurable; API keys in OS keychain, referenced by provider id.
+- [x] Model metadata pulled and cached from models.dev; refreshes on a schedule.
+- [x] `IModelRouter` interface exists; `ManualRouter` implemented.
+- [x] Choice stored in `node.meta`. **The model-selector UI moved to R1** — it ended up implemented as the unified policy control (`PolicyPicker`), which covers the per-session default + per-node override for *both* manual model selection and the auto modes. R0 shipped the data path (`node.meta`); the picker UI is R1.
+- [x] **Telemetry**: every call logs `{ modelId, providerId, tokensIn, tokensOut, cost, latencyMs, policy, reason }`.
+- [x] Each node displays a model badge + its cost.
 
-### R1 — Heuristic auto-routing
-- [ ] `RoutingPolicy` toggle in the UI: Manual / Auto-cost / Auto-quality / Auto-balanced.
-- [ ] `HeuristicRouter` implements capability-filter → tiering. Signals → tier (small / mid / large):
+### R1 — Heuristic auto-routing — ✅ Done (v0.4.0)
+- [x] `RoutingPolicy` toggle in the UI: Manual / Auto-cost / Auto-quality / Auto-balanced. *Implemented as the unified `PolicyPicker`, which also absorbs R0's deferred manual model selector (one control for session default + per-node override).*
+- [x] `HeuristicRouter` implements capability-filter → tiering. Signals → tier (small / mid / large):
   - prompt + reconstructed-history length
   - presence of code / attachments
   - `requires.toolCall` or `requires.structuredOutput`
   - conversation depth (ancestor count)
-- [ ] Manual override always wins over auto.
-- [ ] `ModelChoice.reason` surfaced in the node badge (so the user sees *why* a model was picked).
-- [ ] Acceptance test: given a trivial prompt under Auto-cost, the cheapest capable model is selected; given a prompt requiring tools, models lacking tool-calling are never selected.
+- [x] Manual override always wins over auto.
+- [x] `ModelChoice.reason` surfaced in the node badge (so the user sees *why* a model was picked).
+- [x] Acceptance test: given a trivial prompt under Auto-cost, the cheapest capable model is selected; given a prompt requiring tools, models lacking tool-calling are never selected.
 
-### R2 — Learned router or gateway (gated)
+> **Note on candidates (resolves §5 open question):** the auto-router chooses from a **curated per-provider {small, mid, large} table**, not the full models.dev catalog; models.dev is metadata-only.
+> **Reported divergence (not changed):** §2 says "each provider is an `IChatClient`; the router only decides which one to invoke." The routing *seam* and selection are done, but turn **execution is still Anthropic-only** — multi-provider `IChatClient` dispatch is deferred (effectively R2-adjacent). §4.1's cache-aware cost (accounting for cached-prefix reuse when scoring) is also not yet implemented.
+
+### R2 — Learned router or gateway (gated) — ⏳ Planned (gated)
 **Gate condition:** R1 telemetry shows meaningful spend AND evidence that the heuristic mis-routes often enough to matter. Only then:
 - [ ] Either integrate a learned router ([RouteLLM](https://github.com/lm-sys/RouteLLM), [Anyscale llm-router](https://github.com/anyscale/llm-router), or [LLMRouter](https://github.com/ulab-uiuc/LLMRouter)) behind `IModelRouter`,
 - [ ] **or** add a `GatewayRouter` that delegates to an external gateway (OpenRouter Auto, LiteLLM) — same interface, the gateway does the routing.

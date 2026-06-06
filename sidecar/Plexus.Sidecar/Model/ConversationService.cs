@@ -74,7 +74,7 @@ public sealed class ConversationService
 
         // 4. Resolve the effective policy and pick a model.
         var requires = new RequestRequirements(
-            StructuredOutput: true, // always — block emission strategy (a), SPEC.md §4.2
+            StructuredOutput: true, // always — block emission strategy (a), docs/spec.md §4.2
             MinContext: EstimateTokens(history));
 
         // Effective policy: explicit request (UI: node override ?? session default),

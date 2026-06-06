@@ -2,7 +2,7 @@ using Microsoft.Data.Sqlite;
 
 namespace Plexus.Sidecar.Routing;
 
-// Every model call is recorded (SPEC-model-routing.md §3 R0). This is the data
+// Every model call is recorded (docs/spec-model-routing.md §3 R0). This is the data
 // that must exist before R1 auto-routing can be validated — you can't tune
 // routing without per-request cost.
 public sealed record TelemetryRecord(

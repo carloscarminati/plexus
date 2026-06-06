@@ -1,6 +1,6 @@
 namespace Plexus.Sidecar.Routing;
 
-// The routing seam (SPEC-model-routing.md §2). Introduce the seam now, the
+// The routing seam (docs/spec-model-routing.md §2). Introduce the seam now, the
 // intelligence later: ManualRouter today, HeuristicRouter/LearnedRouter behind
 // the same interface in R1/R2.
 

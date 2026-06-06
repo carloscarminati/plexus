@@ -100,7 +100,7 @@ export interface Graph {
   defaultPolicy?: RoutingPolicy; // session default routing policy (R1)
 }
 
-// ── Model routing (R1) — see SPEC-model-routing.md ──────────────────────────
+// ── Model routing (R1) — see docs/spec-model-routing.md ─────────────────────
 
 export type RoutingObjective = "cost" | "quality" | "balanced";
 

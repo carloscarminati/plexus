@@ -1,67 +1,91 @@
 # Plexus
 
-> A desktop app where an AI conversation is a **graph of richly-rendered blocks** on a canvas. Branch from any node, resume from any node, and each assistant turn is rendered in its *best representation* (table, link card, chart, code, interactive widget) instead of a wall of markdown.
+A desktop app where an AI conversation is a **graph of richly-rendered blocks** on a canvas — branch from any node, resume from any node, and each assistant turn renders in its *best representation* (table, link card, chart, code, interactive widget) instead of a wall of markdown.
 
-Plexus fixes two things open chat loses:
+![Plexus canvas](docs/screenshot.png)
 
-1. **Shape.** A list renders as a table, a URL as a preview card, tabular data as a grid — not prose.
-2. **Branching.** Fork at any earlier point, explore two directions, keep both visible with their context intact.
+## What's interesting
 
-It's **local-first** (the graph lives on disk) and **provider-agnostic** (bring your own API key).
+- **Adaptive blocks.** The model emits a typed array of blocks (`markdown`, `table`, `link_card`, `code`, `chart`, `choices`); the sidecar validates them, resolves link-card previews server-side, and falls back to a heuristic parser for plain prose.
+- **A branching canvas.** The conversation is a tree on a [React Flow](https://reactflow.dev) canvas. Pick any node, send a message, get a new child — fork a thread and keep both directions visible with their context intact.
+- **Cost-aware model routing.** Configure providers and choose a model **manually or automatically by request complexity**, optimizing for cost, quality, or a balance. A capability filter never picks a model that can't do the task; routing stays sticky per branch to preserve the prompt cache; every turn records model, cost, latency, and *why* it was picked — shown as a badge on each node.
+- **Local-first & BYO key.** The graph persists to SQLite on disk; the API key lives in the OS keychain and never reaches the renderer.
 
 ## Architecture
 
 ```
-┌─────────────────────────── Tauri shell ───────────────────────────┐
-│  Frontend (Vite + React)            Sidecar (.NET, the "brain")    │
-│  ─ canvas: React Flow               ─ conversation graph + state   │
-│  ─ block renderers                  ─ persistence (SQLite)         │
-│  ─ sandboxed iframes for MCP UI     ─ model API calls + prompt cache│
-│         ▲                           ─ MCP host (official C# SDK)    │
-│         │  local WebSocket (stream) ─ block-spec orchestration     │
-│         └─────────────────────────────────────▲                   │
-│  OS keychain (API keys)  ───────────────────────┘                  │
-└────────────────────────────────────────────────────────────────────┘
+┌──────────────── Tauri shell ────────────────┐
+│  Frontend (Vite + React)   Sidecar (.NET)    │
+│  ─ React Flow canvas        ─ conversation graph + SQLite
+│  ─ block renderers          ─ model calls + prompt cache
+│         ▲   local WebSocket  ─ model routing + telemetry
+│         └──────────────────────────▲         │
+│  OS keychain (API keys) ────────────┘         │
+└───────────────────────────────────────────────┘
 ```
 
-- **Frontend renders, never thinks.** It receives blocks + node/edge events over a local WebSocket.
-- **Sidecar owns everything stateful**: the graph, persistence, model calls, prompt caching.
-- The single most important artifact is the **Block contract** — [`contract/blocks.ts`](contract/blocks.ts). The .NET side mirrors it.
+The frontend renders, never thinks. The .NET sidecar owns all state. The single most important artifact is the **Block contract** — [`contract/blocks.ts`](contract/blocks.ts), mirrored on the .NET side.
 
-## Repo layout
+| Path        | What                                                       |
+| ----------- | ---------------------------------------------------------- |
+| `contract/` | `blocks.ts` — shared Block + graph + routing contract      |
+| `sidecar/`  | .NET solution — the brain (WebSocket, SQLite, routing)     |
+| `app/`      | Tauri shell + Vite/React frontend                          |
+| `docs/`     | the guiding documents — [spec.md](docs/spec.md), [spec-model-routing.md](docs/spec-model-routing.md), [sidecar.md](docs/sidecar.md) |
 
-| Path        | What                                                          |
-| ----------- | ------------------------------------------------------------ |
-| `contract/` | `blocks.ts` — shared Block contract (source of truth)        |
-| `sidecar/`  | .NET solution — the brain (WebSocket, SQLite, model calls)   |
-| `app/`      | Tauri shell + Vite/React frontend (coming)                   |
-| `docs/`     | architecture notes, screenshots                              |
-| `SPEC.md`   | the guiding document / contract                              |
+## Run it
 
-## Running the sidecar (P0)
-
-Requires the [.NET SDK](https://dotnet.microsoft.com/) (10+).
+Requires the [.NET SDK](https://dotnet.microsoft.com/) (10+), [Node](https://nodejs.org) (20+), and [Rust](https://www.rust-lang.org/tools/install).
 
 ```bash
-# Provide your Anthropic API key (the sidecar prefers the OS keychain, falls back to env).
-export ANTHROPIC_API_KEY=sk-ant-...
-
-cd sidecar
-dotnet run --project Plexus.Sidecar
-```
-
-The sidecar listens on `ws://127.0.0.1:8765/ws` and persists the graph to `~/.plexus/plexus.sqlite`.
-
-To store the key in the macOS keychain instead of an env var:
-
-```bash
+# Store your Anthropic API key in the macOS keychain (preferred) or an env var:
 security add-generic-password -a plexus -s plexus-anthropic-key -w "sk-ant-..."
+
+# Sidecar (the brain):
+dotnet run --project sidecar/Plexus.Sidecar          # ws://127.0.0.1:8765
+
+# App (in another terminal):
+cd app && npm install && npm run tauri dev
 ```
 
-## Status
+See [docs/sidecar.md](docs/sidecar.md) for the WebSocket protocol and a spec→implementation status map.
 
-Building toward **P0** (walking skeleton): linear conversation, blocks `{markdown, table, link_card, code}`, structured-output + heuristic fallback, OG-image resolution, SQLite persistence. See [`SPEC.md`](SPEC.md) §5 for the phase plan.
+## Status — v0.4.0
 
-## License
+| Phase | Scope | State |
+| ----- | ----- | ----- |
+| **P0** | Walking skeleton: blocks, sidecar, SQLite, keychain | ✅ done (`v0.1.0`) |
+| **P1** | Branching canvas, `chart`/`choices`, prompt caching | ✅ done (`v0.2.0`) |
+| **R0** | Model registry (models.dev), routing seam, cost telemetry | ✅ done (`v0.3.0`) |
+| **R1** | Heuristic auto-routing + unified policy control | ✅ done (`v0.4.0`) |
+| **P2** | DAG merge, MCP host + `mcp_ui` block | ⏳ planned |
+| **R2** | Learned router / gateway (gated on R1 telemetry) | ⏳ planned |
 
-[MIT](LICENSE).
+Next up: a one-click **"escalate to a stronger model"** action that re-runs a node as a sibling branch — model comparison as a first-class visual act.
+
+See [docs/spec.md](docs/spec.md) and [docs/spec-model-routing.md](docs/spec-model-routing.md) for the full plans, and [docs/sidecar.md](docs/sidecar.md) for the spec→implementation map.
+
+## Acknowledgements
+
+**Built on** (real dependencies — see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) for the full, generated list):
+
+- [React Flow](https://reactflow.dev) (`@xyflow/react`) + [dagre](https://github.com/dagrejs/dagre) — the canvas and its layout
+- [Tauri](https://tauri.app) (`@tauri-apps/*`) — the desktop shell
+- [Anthropic .NET SDK](https://github.com/anthropics/anthropic-sdk-csharp) + [Microsoft.Extensions.AI](https://github.com/dotnet/extensions) — model calls
+- [Microsoft.Data.Sqlite](https://github.com/dotnet/efcore) (+ SQLitePCLRaw) — local-first persistence
+- [marked](https://marked.js.org) — markdown rendering
+- [models.dev](https://models.dev) — live model pricing/capability metadata for the router
+
+**Inspired by** (design influence, *not* dependencies):
+
+- [Vercel json-render](https://github.com/vercel/json-render) & A2UI — constrained generative UI from JSON *(Plexus's block catalog is hand-rolled, not json-render)*
+- [MCP-UI](https://mcpui.dev) & [MCP Apps](https://blog.modelcontextprotocol.io/posts/2025-11-21-mcp-apps/) — UI over MCP (the basis for the planned `mcp_ui` block in P2)
+- [tldraw branching-chat](https://tldraw.dev/starter-kits/branching-chat) — branching conversation on a canvas
+- [OpenCode](https://github.com/opencode-ai/opencode) — client/server architecture
+- [RouteLLM](https://github.com/lm-sys/RouteLLM) — model routing
+
+## License & credits
+
+[MIT](LICENSE) © 2026 [Carlos Carminati](https://github.com/carloscarminati). Third-party licenses: [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+
+Repository: <https://github.com/carloscarminati/plexus>
