@@ -135,7 +135,7 @@ Rendering & bridge:
 > tool and inserting the human gate between the model's request and the host's
 > execution. Same safety outcome; different plumbing. **Deferred:** provider-generic
 > tool execution via `IChatClient` + multi-provider dispatch (so MCP tools work on
-> any selected provider, not just Anthropic). Tracked in #N (TODO: link issue) —
+> any selected provider, not just Anthropic). Tracked in #1 —
 > see the matching note in [spec.md](./spec.md) §5 Divergences.
 >
 > **Robustness guards (M0):** the agentic tool loop is bounded to **8 tool-use rounds
