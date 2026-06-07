@@ -10,6 +10,9 @@ export interface Pending {
   parentId: string | null;
 }
 
+// One entry in the graph history sidebar.
+export type GraphSummary = Extract<ServerEvent, { type: "graphs" }>["graphs"][number];
+
 export function useSidecar() {
   const [status, setStatus] = useState<Status>("connecting");
   const [graph, setGraph] = useState<Graph | null>(null);
@@ -22,7 +25,13 @@ export function useSidecar() {
   const [nodeOverrides, setNodeOverrides] = useState<Record<string, RoutingPolicy>>({});
   // M0: a pending MCP tool-confirmation request (host is waiting on the user).
   const [confirm, setConfirm] = useState<Extract<ServerEvent, { type: "tool_confirmation_request" }> | null>(null);
+  // Graph history (sidebar), most-recently-active first.
+  const [graphs, setGraphs] = useState<GraphSummary[]>([]);
   const socketRef = useRef<WebSocket | null>(null);
+  // Latest active graph id, readable inside the socket handler without stale closures.
+  const activeIdRef = useRef<string | null>(null);
+  // Auto-open (last active / new) runs once, on the first graph list.
+  const initializedRef = useRef(false);
 
   const send = useCallback((event: ClientEvent) => {
     const sock = socketRef.current;
@@ -58,6 +67,26 @@ export function useSidecar() {
         case "models":
           setModels(msg.models);
           break;
+        case "graphs": {
+          setGraphs(msg.graphs);
+          // Keep the active graph's title in sync (server may derive/rename it).
+          setGraph((g) => {
+            if (!g) return g;
+            const s = msg.graphs.find((x) => x.id === g.id);
+            return s ? { ...g, title: s.title } : g;
+          });
+          const activeId = activeIdRef.current;
+          const activeExists = !!activeId && msg.graphs.some((x) => x.id === activeId);
+          // First list → open the last active graph (or create one). Later, if the
+          // active graph just got deleted, fall back to the most recent / a new one.
+          if (!initializedRef.current) {
+            initializedRef.current = true;
+            send(msg.graphs.length > 0 ? { type: "load_graph", graphId: msg.graphs[0].id } : { type: "new_graph" });
+          } else if (activeId && !activeExists) {
+            send(msg.graphs.length > 0 ? { type: "load_graph", graphId: msg.graphs[0].id } : { type: "new_graph" });
+          }
+          break;
+        }
         case "tool_confirmation_request":
           setConfirm(msg);
           break;
@@ -75,8 +104,9 @@ export function useSidecar() {
       socketRef.current = sock;
       sock.onopen = () => {
         setStatus("online");
-        sock.send(JSON.stringify({ type: "new_graph", title: "Conversation" } satisfies ClientEvent));
         sock.send(JSON.stringify({ type: "list_models" } satisfies ClientEvent));
+        // The graph list drives startup: open the last active one, or create one.
+        sock.send(JSON.stringify({ type: "list_graphs" } satisfies ClientEvent));
       };
       sock.onmessage = (ev) => {
         try {
@@ -99,6 +129,43 @@ export function useSidecar() {
       socketRef.current?.close();
     };
   }, []);
+
+  // Keep the ref the socket handler reads in sync with the active graph.
+  useEffect(() => {
+    activeIdRef.current = graph?.id ?? null;
+  }, [graph]);
+
+  // ── Graph management (new / open / rename / delete) ───────────────────────
+  const newGraph = useCallback(() => {
+    send({ type: "new_graph" }); // title is derived from the first message
+  }, [send]);
+
+  const openGraph = useCallback(
+    (id: string) => {
+      if (id === activeIdRef.current) return;
+      setError(null);
+      send({ type: "load_graph", graphId: id });
+    },
+    [send],
+  );
+
+  const renameGraph = useCallback(
+    (id: string, title: string) => {
+      const t = title.trim() || undefined;
+      send({ type: "set_graph_title", graphId: id, title: t });
+      setGraphs((gs) => gs.map((g) => (g.id === id ? { ...g, title: t } : g))); // optimistic
+      setGraph((g) => (g && g.id === id ? { ...g, title: t } : g));
+    },
+    [send],
+  );
+
+  const deleteGraph = useCallback(
+    (id: string) => {
+      send({ type: "delete_graph", graphId: id });
+      setGraphs((gs) => gs.filter((g) => g.id !== id)); // optimistic; server confirms + may switch
+    },
+    [send],
+  );
 
   // Click a node: plain click selects only it; shift/cmd-click toggles it in the
   // set (for a DAG merge of ≥2 nodes).
@@ -185,6 +252,11 @@ export function useSidecar() {
   return {
     status,
     graph,
+    graphs,
+    newGraph,
+    openGraph,
+    renameGraph,
+    deleteGraph,
     pending,
     error,
     selectedIds,

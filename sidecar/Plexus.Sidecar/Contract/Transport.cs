@@ -18,6 +18,8 @@ namespace Plexus.Sidecar.Contract;
 [JsonDerivedType(typeof(ListModelsEvent), "list_models")]
 [JsonDerivedType(typeof(ToolConfirmationEvent), "tool_confirmation")]
 [JsonDerivedType(typeof(EscalateEvent), "escalate")]
+[JsonDerivedType(typeof(SetGraphTitleEvent), "set_graph_title")]
+[JsonDerivedType(typeof(DeleteGraphEvent), "delete_graph")]
 public abstract class ClientEvent { }
 
 public sealed class LoadGraphEvent : ClientEvent
@@ -71,6 +73,19 @@ public sealed class EscalateEvent : ClientEvent
     public string GraphId { get; set; } = "";
     public string NodeId { get; set; } = ""; // the assistant node to escalate
     public RoutingPolicy? Policy { get; set; } // default: auto:quality (top tier)
+}
+
+// Graph management — rename a graph (inline title edit).
+public sealed class SetGraphTitleEvent : ClientEvent
+{
+    public string GraphId { get; set; } = "";
+    public string? Title { get; set; }
+}
+
+// Graph management — delete a graph and its nodes (destructive; UI confirms).
+public sealed class DeleteGraphEvent : ClientEvent
+{
+    public string GraphId { get; set; } = "";
 }
 
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]

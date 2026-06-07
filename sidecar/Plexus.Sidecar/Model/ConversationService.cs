@@ -89,6 +89,16 @@ public sealed class ConversationService
         graph.Nodes.Add(userNode);
         await emit(new NodeCreatedServerEvent { Node = userNode });
 
+        // Derive the graph title from the first user message, until one exists.
+        // A manual rename sets a title, so this won't clobber it afterwards.
+        if (string.IsNullOrWhiteSpace(graph.Title))
+        {
+            var title = DeriveTitle(text);
+            _store.SetGraphTitle(graphId, title);
+            graph.Title = title;
+            await emit(new GraphsServerEvent { Graphs = _store.ListGraphs() });
+        }
+
         // The assistant node is a child of the user node; its context is the user
         // node's ancestor path; stickiness looks at the branch we came from.
         await GenerateAssistantAsync(
@@ -315,6 +325,16 @@ public sealed class ConversationService
     }
 
     private static string TruncateText(string s, int max) => s.Length <= max ? s : s[..max] + "…";
+
+    // A graph title from the first user message: first non-empty line, collapsed
+    // whitespace, truncated. Editable inline afterwards.
+    private static string DeriveTitle(string text)
+    {
+        var firstLine = text.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(l => l.Trim()).FirstOrDefault(l => l.Length > 0) ?? "";
+        var collapsed = System.Text.RegularExpressions.Regex.Replace(firstLine, @"\s+", " ");
+        return string.IsNullOrEmpty(collapsed) ? "New conversation" : TruncateText(collapsed, 48);
+    }
 
     private static string Canonical(RoutingPolicy? p) =>
         p is null ? "" : p.Kind == "manual" ? $"manual:{p.ModelId}" : $"auto:{p.Objective}";

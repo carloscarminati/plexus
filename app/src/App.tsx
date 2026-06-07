@@ -3,6 +3,7 @@ import { BlockView } from "./blocks/BlockView";
 import { CanvasView } from "./CanvasView";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { PolicyPicker } from "./PolicyPicker";
+import { GraphSidebar } from "./GraphSidebar";
 import { useSidecar } from "./useSidecar";
 import { formatCost, shortModel } from "./format";
 import type { RoutingPolicy } from "./contract";
@@ -13,6 +14,11 @@ function App() {
   const {
     status,
     graph,
+    graphs,
+    newGraph,
+    openGraph,
+    renameGraph,
+    deleteGraph,
     pending,
     error,
     selectedIds,
@@ -87,6 +93,15 @@ function App() {
       </header>
 
       <div className="workspace">
+        <GraphSidebar
+          graphs={graphs}
+          activeId={graph?.id ?? null}
+          onNew={newGraph}
+          onOpen={openGraph}
+          onRename={renameGraph}
+          onDelete={deleteGraph}
+        />
+
         <div className="canvas-pane">
           {graph && nodes.length > 0 ? (
             <CanvasView graph={graph} selectedIds={selectedIds} pending={pending} onClickNode={clickNode} />

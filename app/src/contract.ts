@@ -128,10 +128,13 @@ export type ClientEvent =
   | { type: "tool_confirmation"; toolUseId: string; approved: boolean }
   // R1 §4.2 — re-run the input that produced an assistant node with a (usually
   // stronger) model as a SIBLING branch (same parent), for side-by-side compare.
-  | { type: "escalate"; graphId: string; nodeId: string; policy?: RoutingPolicy };
+  | { type: "escalate"; graphId: string; nodeId: string; policy?: RoutingPolicy }
+  // Graph management — rename / delete a graph.
+  | { type: "set_graph_title"; graphId: string; title?: string }
+  | { type: "delete_graph"; graphId: string };
 
 export type ServerEvent =
-  | { type: "graphs"; graphs: { id: string; title?: string }[] }
+  | { type: "graphs"; graphs: { id: string; title?: string; updatedAt?: string }[] }
   | { type: "graph"; graph: Graph }
   | { type: "node_created"; node: Node }
   | { type: "turn_started"; nodeId: string; parentId: string | null }

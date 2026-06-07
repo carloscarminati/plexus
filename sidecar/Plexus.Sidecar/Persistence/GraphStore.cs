@@ -70,11 +70,18 @@ public sealed class GraphStore
         }
     }
 
+    // Most-recently-active first. "Active" = latest node's createdAt (derived, no
+    // write-path change), falling back to the graph's own createdAt when empty.
     public List<GraphSummary> ListGraphs()
     {
         using var conn = Open();
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT id, title FROM graphs ORDER BY created_at DESC;";
+        cmd.CommandText = """
+            SELECT g.id, g.title, COALESCE(MAX(n.created_at), g.created_at) AS updated_at
+            FROM graphs g LEFT JOIN nodes n ON n.graph_id = g.id
+            GROUP BY g.id, g.title, g.created_at
+            ORDER BY updated_at DESC;
+            """;
         using var reader = cmd.ExecuteReader();
         var result = new List<GraphSummary>();
         while (reader.Read())
@@ -83,9 +90,44 @@ public sealed class GraphStore
             {
                 Id = reader.GetString(0),
                 Title = reader.IsDBNull(1) ? null : reader.GetString(1),
+                UpdatedAt = reader.IsDBNull(2) ? null : reader.GetString(2),
             });
         }
         return result;
+    }
+
+    public void SetGraphTitle(string graphId, string? title)
+    {
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "UPDATE graphs SET title = $title WHERE id = $id;";
+        cmd.Parameters.AddWithValue("$title", (object?)title ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$id", graphId);
+        cmd.ExecuteNonQuery();
+    }
+
+    // Destructive: removes the graph and its nodes. (ON DELETE CASCADE is declared
+    // but only enforced when foreign_keys is ON per-connection, so delete both
+    // explicitly inside a transaction.)
+    public void DeleteGraph(string graphId)
+    {
+        using var conn = Open();
+        using var tx = conn.BeginTransaction();
+        using (var ncmd = conn.CreateCommand())
+        {
+            ncmd.Transaction = tx;
+            ncmd.CommandText = "DELETE FROM nodes WHERE graph_id = $id;";
+            ncmd.Parameters.AddWithValue("$id", graphId);
+            ncmd.ExecuteNonQuery();
+        }
+        using (var gcmd = conn.CreateCommand())
+        {
+            gcmd.Transaction = tx;
+            gcmd.CommandText = "DELETE FROM graphs WHERE id = $id;";
+            gcmd.Parameters.AddWithValue("$id", graphId);
+            gcmd.ExecuteNonQuery();
+        }
+        tx.Commit();
     }
 
     public bool GraphExists(string graphId)

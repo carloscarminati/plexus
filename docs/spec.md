@@ -180,7 +180,7 @@ This is the standard ancestor-walk used by existing canvas chats. The merge case
 - [x] Assistant turns render as **blocks** with catalog `{markdown, table, link_card, code}`.
 - [x] Strategy (a) works for one provider; strategy (b) fallback parser implemented. *(a) is implemented as prompt-guided JSON rather than the provider's tool/structured-output mechanism — see Divergences below.*
 - [x] `link_card` resolves an OG image server-side.
-- [x] Graph persists to SQLite and reloads on restart. *(persistence + reload work; there is not yet a UI to reopen a prior graph — see Divergences.)*
+- [x] Graph persists to SQLite and reloads on restart. *(persistence + reload work; the history sidebar to reopen a prior graph landed in P2 — see below.)*
 
 ### P1 — The canvas — ✅ Done (v0.2.0)
 - [x] Conversation renders as a tree of nodes on a React Flow canvas with edges.
@@ -191,6 +191,7 @@ This is the standard ancestor-walk used by existing canvas chats. The merge case
 
 ### P2 — Reach — 🚧 In progress
 - [x] DAG merge: multi-select nodes, union-of-ancestors context. *(done — `node.mergeParents`, multi-parent ancestor-walk in `BuildHistory`, shift/⌘-click multi-select on the canvas with dashed merge edges)*
+- [x] Conversation history: new / list / switch / rename / delete graphs over the existing SQLite persistence. *(done — `GraphSidebar`; startup opens the last active graph; titles derived from the first user message; ordered most-recently-active first)*
 - [ ] MCP host (official C# SDK) wired; `mcp_ui` block renders MCP Apps UI resources in a sandboxed iframe.
 - [ ] Optional: migrate the block catalog onto Vercel json-render.
 - [ ] Optional: expose Plexus's own MCP server.
@@ -198,7 +199,6 @@ This is the standard ancestor-walk used by existing canvas chats. The merge case
 ### Divergences from this spec (reported, not silently changed)
 - **Execution is Anthropic-first.** Although the design calls for provider-agnostic execution (each provider a `Microsoft.Extensions.AI.IChatClient`), turn execution currently runs the **Anthropic SDK** path directly. The router *selects* across providers, but **multi-provider `IChatClient` dispatch and a provider-generic tool-use loop are DEFERRED.** MCP tools (M0) are therefore driven through the Anthropic tool-use loop. Tracked in #1.
 - **Strategy (a) mechanism.** §4.2 prefers the provider's structured-output / tool mechanism; it is implemented as **prompt-guided JSON** because strict structured outputs can't express the open-keyed `table.rows` map. Schema validation + the (b) fallback still apply. *(documented in [sidecar.md](sidecar.md))*
-- **Graph reload UI.** Persistence and `LoadGraph` exist, but the app creates a fresh graph on launch and has no UI to reopen a stored graph yet.
 
 ## 6. Repo setup (first public repo)
 

@@ -83,7 +83,8 @@ public sealed class WebSocketHub
 
             case NewGraphEvent ng:
                 var created = _store.CreateGraph(ng.Title);
-                await SendAsync(new GraphServerEvent { Graph = created });
+                await SendAsync(new GraphServerEvent { Graph = created }); // make it active
+                await SendAsync(new GraphsServerEvent { Graphs = _store.ListGraphs() }); // refresh the list
                 break;
 
             case LoadGraphEvent lg:
@@ -134,6 +135,16 @@ public sealed class WebSocketHub
 
             case SetSessionPolicyEvent sp:
                 _store.SetGraphPolicy(sp.GraphId, sp.Policy);
+                break;
+
+            case SetGraphTitleEvent st:
+                _store.SetGraphTitle(st.GraphId, string.IsNullOrWhiteSpace(st.Title) ? null : st.Title.Trim());
+                await SendAsync(new GraphsServerEvent { Graphs = _store.ListGraphs() });
+                break;
+
+            case DeleteGraphEvent dg:
+                _store.DeleteGraph(dg.GraphId);
+                await SendAsync(new GraphsServerEvent { Graphs = _store.ListGraphs() });
                 break;
 
             case ListModelsEvent:
