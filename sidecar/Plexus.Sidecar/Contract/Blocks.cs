@@ -61,19 +61,34 @@ public sealed class CodeBlock : Block
     public string? Filename { get; set; }
 }
 
-public sealed class ChartBlock : Block // P1
+// C1 — a curated Vega-Lite subset (channel-based, generalizes across marks). NOT a
+// full Vega-Lite passthrough: data URLs, transforms, selections and expressions are
+// forbidden by construction (no fields for them) and rejected by the schema
+// (additionalProperties:false, applied via the catalog entry's refinement).
+public sealed class ChartBlock : Block // P1 → C1
 {
-    [JsonRequired] public string Chart { get; set; } = "line"; // "line" | "bar" | "scatter"
-    public List<string>? XLabels { get; set; }
-    [JsonRequired] public List<ChartSeries> Series { get; set; } = new();
-    public string? XTitle { get; set; }
-    public string? YTitle { get; set; }
+    [JsonRequired] public string Mark { get; set; } = "bar"; // bar|line|point|arc|area|rect
+    [JsonRequired] public List<Dictionary<string, JsonElement>> Data { get; set; } = new(); // inline records
+    [JsonRequired] public ChartEncoding Encoding { get; set; } = new();
+    public string? Title { get; set; }
+    public bool? Legend { get; set; }
+    public bool? Stack { get; set; } // bar/area
 }
 
-public sealed class ChartSeries
+// channel → field mapping appropriate to the mark.
+public sealed class ChartEncoding
 {
-    public string? Name { get; set; }
-    [JsonRequired] public List<double> Values { get; set; } = new();
+    public ChartChannel? X { get; set; }
+    public ChartChannel? Y { get; set; }
+    public ChartChannel? Color { get; set; }
+    public ChartChannel? Theta { get; set; } // magnitude — for arc (pie/donut)
+    public ChartChannel? Size { get; set; }  // for point
+}
+
+public sealed class ChartChannel
+{
+    [JsonRequired] public string Field { get; set; } = "";
+    public string? Type { get; set; } // quantitative|nominal|ordinal|temporal
 }
 
 public sealed class ChoicesBlock : Block // P1 — interactive

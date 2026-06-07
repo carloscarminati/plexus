@@ -39,13 +39,29 @@ export interface CodeBlock {
   filename?: string;
 }
 
+// C1 — curated Vega-Lite subset (channel-based). NOT a full passthrough: no data
+// URLs, transforms, selections, or expressions.
+export type ChartMark = "bar" | "line" | "point" | "arc" | "area" | "rect";
+export type ChartFieldType = "quantitative" | "nominal" | "ordinal" | "temporal";
+export interface ChartChannel {
+  field: string;
+  type?: ChartFieldType;
+}
+export interface ChartEncoding {
+  x?: ChartChannel;
+  y?: ChartChannel;
+  color?: ChartChannel;
+  theta?: ChartChannel; // magnitude — for arc
+  size?: ChartChannel; // for point
+}
 export interface ChartBlock {
   type: "chart";
-  chart: "line" | "bar" | "scatter";
-  xLabels?: string[];
-  series: { name?: string; values: number[] }[];
-  xTitle?: string;
-  yTitle?: string;
+  mark: ChartMark;
+  data: Record<string, string | number | boolean | null>[]; // inline records
+  encoding: ChartEncoding;
+  title?: string;
+  legend?: boolean;
+  stack?: boolean; // bar/area
 }
 
 export interface ChoicesBlock {

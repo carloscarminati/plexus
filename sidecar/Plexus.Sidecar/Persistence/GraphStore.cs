@@ -206,7 +206,9 @@ public sealed class GraphStore
                     ParentId = reader.IsDBNull(1) ? null : reader.GetString(1),
                     Role = reader.GetString(2),
                     CreatedAt = reader.GetString(3),
-                    Blocks = PlexusJson.Deserialize<List<Block>>(reader.GetString(4)) ?? new(),
+                    // Upconvert any legacy block shapes (e.g. old charts) before
+                    // deserializing, so persisted graphs load under the current contract.
+                    Blocks = PlexusJson.Deserialize<List<Block>>(BlockCatalog.MigrateLegacyJson(reader.GetString(4))) ?? new(),
                     Raw = reader.GetString(5),
                     Meta = reader.IsDBNull(6) ? null : PlexusJson.Deserialize<NodeMeta>(reader.GetString(6)),
                     MergeParents = reader.IsDBNull(7) ? null : PlexusJson.Deserialize<List<string>>(reader.GetString(7)),

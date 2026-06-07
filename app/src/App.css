@@ -559,41 +559,25 @@ body {
 }
 
 /* chart block */
+/* C1 — Vega-Lite chart (themed in ChartView; Vega renders the SVG). */
 .block-chart {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 10px;
+  overflow-x: auto;
 }
-.block-chart .axis {
-  stroke: var(--border);
-  stroke-width: 1;
+.chart-plot {
+  min-height: 240px;
 }
-.block-chart .axis-zero {
-  stroke: var(--muted);
-  stroke-dasharray: 3 3;
+.chart-plot svg {
+  max-width: 100%;
+  height: auto;
 }
-.block-chart .axis-label {
-  fill: var(--muted);
-  font-size: 10px;
-}
-.chart-legend {
-  display: flex;
-  gap: 14px;
-  margin-top: 8px;
-  font-size: 12px;
+.chart-error {
   color: var(--muted);
-}
-.chart-legend span {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-}
-.chart-legend i {
-  width: 10px;
-  height: 10px;
-  border-radius: 2px;
-  display: inline-block;
+  font-size: 12px;
+  padding: 12px;
 }
 
 /* choices block */

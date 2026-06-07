@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using Plexus.Sidecar.Contract;
 using Plexus.Sidecar.Model;
+using Plexus.Sidecar.Services;
 
 namespace Plexus.Sidecar.Tests;
 
@@ -18,7 +19,12 @@ public class BlockCatalogTests
         new object[] { "table", """{"type":"table","columns":[{"key":"a","label":"A"}],"rows":[{"a":"x"}],"caption":"c"}""" },
         new object[] { "link_card", """{"type":"link_card","url":"https://example.com","title":"t"}""" },
         new object[] { "code", """{"type":"code","language":"js","code":"const x = 1;"}""" },
-        new object[] { "chart", """{"type":"chart","chart":"line","series":[{"name":"s","values":[1,2,3]}],"xLabels":["a","b","c"]}""" },
+        new object[] { "chart-bar", """{"type":"chart","mark":"bar","data":[{"k":"a","v":1},{"k":"b","v":2}],"encoding":{"x":{"field":"k","type":"nominal"},"y":{"field":"v","type":"quantitative"}},"title":"t"}""" },
+        new object[] { "chart-arc", """{"type":"chart","mark":"arc","data":[{"c":"a","n":3},{"c":"b","n":5}],"encoding":{"theta":{"field":"n","type":"quantitative"},"color":{"field":"c","type":"nominal"}}}""" },
+        new object[] { "chart-line", """{"type":"chart","mark":"line","data":[{"year":2014,"price":3.1},{"year":2015,"price":2.5}],"encoding":{"x":{"field":"year","type":"ordinal"},"y":{"field":"price","type":"quantitative"}}}""" },
+        new object[] { "chart-point", """{"type":"chart","mark":"point","data":[{"h":2,"g":45},{"h":5,"g":70}],"encoding":{"x":{"field":"h","type":"quantitative"},"y":{"field":"g","type":"quantitative"}}}""" },
+        new object[] { "chart-rect", """{"type":"chart","mark":"rect","data":[{"d":"Mon","h":"09","c":18}],"encoding":{"x":{"field":"h","type":"ordinal"},"y":{"field":"d","type":"ordinal"},"color":{"field":"c","type":"quantitative"}}}""" },
+        new object[] { "chart-area-multi", """{"type":"chart","mark":"area","stack":true,"data":[{"year":2019,"source":"hydro","val":35},{"year":2019,"source":"solar","val":5},{"year":2020,"source":"hydro","val":36},{"year":2020,"source":"solar","val":8}],"encoding":{"x":{"field":"year","type":"ordinal"},"y":{"field":"val","type":"quantitative"},"color":{"field":"source","type":"nominal"}}}""" },
         new object[] { "choices", """{"type":"choices","prompt":"pick","options":[{"id":"a","label":"A"}]}""" },
         new object[] { "mcp_ui", """{"type":"mcp_ui","resourceUri":"ui://x","mimeType":"text/html"}""" },
     };
@@ -41,6 +47,13 @@ public class BlockCatalogTests
         new object[] { "missing required (code.code)", """{"type":"code","language":"js"}""" },
         new object[] { "missing required (table.rows)", """{"type":"table","columns":[{"key":"a","label":"A"}]}""" },
         new object[] { "missing discriminator", """{"text":"x"}""" },
+        // chart (C1) curated-subset controls:
+        new object[] { "chart unknown mark", """{"type":"chart","mark":"bubble","data":[{"x":1,"y":2}],"encoding":{"x":{"field":"x"},"y":{"field":"y"}}}""" },
+        new object[] { "chart missing required encoding", """{"type":"chart","mark":"bar","data":[{"x":1}],"encoding":{}}""" },
+        new object[] { "chart forbidden transform", """{"type":"chart","mark":"bar","data":[{"x":1,"y":2}],"encoding":{"x":{"field":"x"},"y":{"field":"y"}},"transform":[{"calculate":"1"}]}""" },
+        new object[] { "chart forbidden data url", """{"type":"chart","mark":"bar","data":{"url":"https://evil/x.json"},"encoding":{"x":{"field":"x"},"y":{"field":"y"}}}""" },
+        // (B) wide-format multi-series: color references a field absent from records.
+        new object[] { "chart encoding field not in data", """{"type":"chart","mark":"area","stack":true,"data":[{"year":2019,"hydro":35,"solar":5}],"encoding":{"x":{"field":"year","type":"ordinal"},"y":{"field":"hydro","type":"quantitative"},"color":{"field":"source"}}}""" },
     };
 
     [Theory]
@@ -68,7 +81,9 @@ public class BlockCatalogTests
     {
         var expected = BlockCatalog.Entries.Where(e => e.ModelEmitted).Select(e => e.TypeName).OrderBy(x => x).ToArray();
 
-        var inPrompt = Regex.Matches(SystemPrompt.Text, """"type"\s*:\s*"([a-z_]+)"""")
+        // Match the block discriminator only (a shape opens with `{ "type": "<name>"`),
+        // not the chart channel's own "type" field (which lists encoding types).
+        var inPrompt = Regex.Matches(SystemPrompt.Text, "\\{\\s*\"type\"\\s*:\\s*\"([a-z_]+)\"")
             .Select(m => m.Groups[1].Value)
             .Distinct()
             .OrderBy(x => x)
@@ -96,6 +111,42 @@ public class BlockCatalogTests
             .ToArray();
 
         Assert.Equal(catalog, registered);
+    }
+
+    // C1 — the chart entry's curated spec is reflected in the generated schema +
+    // prompt automatically (no hardcoded chart list elsewhere).
+    [Fact]
+    public void Chart_schema_and_prompt_reflect_the_curated_spec()
+    {
+        var chartBranch = BlockCatalog.SchemaNode["items"]!["anyOf"]!.AsArray()
+            .First(b => (string?)b!["properties"]!["type"]!["const"] == "chart")!.AsObject();
+
+        var marks = chartBranch["properties"]!["mark"]!["enum"]!.AsArray().Select(n => (string)n!).ToArray();
+        Assert.Equal(new[] { "bar", "line", "point", "arc", "area", "rect" }, marks);
+        Assert.False(chartBranch["additionalProperties"]!.GetValue<bool>()); // forbids data url/transform/etc
+
+        Assert.Contains("\"mark\"", SystemPrompt.Text);
+        Assert.Contains("\"encoding\"", SystemPrompt.Text);
+        Assert.Contains("arc", SystemPrompt.Text);          // mark guidance present
+        Assert.DoesNotContain("xLabels", SystemPrompt.Text); // old shape gone
+    }
+
+    // C1 back-compat — an OLD-shape chart upconverts and loads under the new contract.
+    [Fact]
+    public void Legacy_chart_upconverts_to_curated_records()
+    {
+        var legacy = """[{"type":"chart","chart":"scatter","xLabels":["a","b"],"series":[{"name":"S1","values":[1,2]},{"name":"S2","values":[3,4]}]}]""";
+
+        var migrated = BlockCatalog.MigrateLegacyJson(legacy);
+        Assert.True(BlockCatalog.ValidateBlocksArray(JsonNode.Parse(migrated), out var errs), string.Join("; ", errs));
+
+        var blocks = PlexusJson.Deserialize<List<Block>>(migrated)!;
+        var chart = Assert.IsType<ChartBlock>(blocks[0]);
+        Assert.Equal("point", chart.Mark);            // scatter → point
+        Assert.Equal(4, chart.Data.Count);            // 2 series × 2 values → flat records
+        Assert.Equal("x", chart.Encoding.X!.Field);
+        Assert.Equal("y", chart.Encoding.Y!.Field);
+        Assert.Equal("series", chart.Encoding.Color!.Field); // multi-series → color channel
     }
 
     // Live path parity: a valid envelope parses via strategy (a); junk falls back to

@@ -78,7 +78,7 @@ function previewOf(blocks: Block[]): string {
     case "link_card":
       return first.title ?? first.url;
     case "chart":
-      return `${first.chart} chart`;
+      return first.title ?? `${first.mark} chart`;
     case "choices":
       return first.prompt ?? "choices";
     default:
