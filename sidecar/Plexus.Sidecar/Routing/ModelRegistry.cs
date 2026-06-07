@@ -211,7 +211,7 @@ public sealed class ModelRegistry
             if (File.Exists(_providersPath))
             {
                 var list = JsonSerializer.Deserialize<List<ProviderConfig>>(
-                    File.ReadAllText(_providersPath), Json.Options);
+                    File.ReadAllText(_providersPath), PlexusJson.Options);
                 if (list is { Count: > 0 })
                     return list;
             }
@@ -224,7 +224,7 @@ public sealed class ModelRegistry
         var defaults = new List<ProviderConfig> { new() { Id = "anthropic", Enabled = true } };
         try
         {
-            File.WriteAllText(_providersPath, JsonSerializer.Serialize(defaults, Json.Options));
+            File.WriteAllText(_providersPath, JsonSerializer.Serialize(defaults, PlexusJson.Options));
         }
         catch
         {

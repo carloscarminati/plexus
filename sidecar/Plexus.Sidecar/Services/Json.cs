@@ -4,7 +4,7 @@ namespace Plexus.Sidecar.Services;
 
 // Single source of JSON conventions for the whole sidecar: camelCase to match
 // the TypeScript contract, omit nulls so optional fields stay absent.
-public static class Json
+public static class PlexusJson
 {
     public static readonly JsonSerializerOptions Options = new()
     {

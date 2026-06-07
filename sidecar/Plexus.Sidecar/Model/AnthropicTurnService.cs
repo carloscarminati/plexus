@@ -198,23 +198,14 @@ public sealed class AnthropicTurnService
     private static string Truncate(string s, int max) =>
         s.Length <= max ? s : s[..max] + "…";
 
-    // Try strategy (a): parse the JSON {"blocks":[...]}. Fall back to (b).
+    // Try strategy (a): parse the JSON {"blocks":[...]}, validating against the
+    // catalog-generated schema before deserializing. Fall back to (b) on anything
+    // that doesn't validate.
     public static List<Block> ParseBlocks(string raw)
     {
         var json = ExtractJsonObject(raw);
-        if (json is not null)
-        {
-            try
-            {
-                var doc = JsonSerializer.Deserialize<TurnEnvelope>(json, Json.Options);
-                if (doc?.Blocks is { Count: > 0 } blocks)
-                    return blocks;
-            }
-            catch (JsonException)
-            {
-                // fall through to the heuristic parser
-            }
-        }
+        if (json is not null && BlockCatalog.TryParse(json, out var blocks))
+            return blocks;
 
         return FallbackParser.Parse(raw);
     }
@@ -242,10 +233,5 @@ public sealed class AnthropicTurnService
             return trimmed[first..(last + 1)];
 
         return null;
-    }
-
-    private sealed class TurnEnvelope
-    {
-        public List<Block> Blocks { get; set; } = new();
     }
 }

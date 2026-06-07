@@ -50,7 +50,7 @@ public sealed class McpHost : IAsyncDisposable
         try
         {
             if (File.Exists(_registryPath))
-                return Json.Deserialize<List<McpServerConfig>>(File.ReadAllText(_registryPath)) ?? new();
+                return PlexusJson.Deserialize<List<McpServerConfig>>(File.ReadAllText(_registryPath)) ?? new();
         }
         catch (Exception ex)
         {
@@ -63,7 +63,7 @@ public sealed class McpHost : IAsyncDisposable
     // NEVER written here — HTTP credentials live in the keychain by server id.
     public void SaveRegistry(List<McpServerConfig> servers)
     {
-        File.WriteAllText(_registryPath, Json.Serialize(servers));
+        File.WriteAllText(_registryPath, PlexusJson.Serialize(servers));
     }
 
     // Re-read the registry and reconnect from scratch so Settings edits (add /

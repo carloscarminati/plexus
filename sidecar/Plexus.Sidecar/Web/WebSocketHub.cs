@@ -57,7 +57,7 @@ public sealed class WebSocketHub
             ClientEvent? evt;
             try
             {
-                evt = JsonSerializer.Deserialize<ClientEvent>(message, Json.Options);
+                evt = JsonSerializer.Deserialize<ClientEvent>(message, PlexusJson.Options);
             }
             catch (JsonException ex)
             {
@@ -386,7 +386,7 @@ public sealed class WebSocketHub
     private async Task SendAsync(ServerEvent ev)
     {
         // Serialize against the base type so the polymorphic "type" discriminator is emitted.
-        var json = JsonSerializer.Serialize(ev, typeof(ServerEvent), Json.Options);
+        var json = JsonSerializer.Serialize(ev, typeof(ServerEvent), PlexusJson.Options);
         var bytes = Encoding.UTF8.GetBytes(json);
         await _sendLock.WaitAsync();
         try

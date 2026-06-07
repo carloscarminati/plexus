@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <PackageReference Include="Anthropic" Version="12.26.0" />
+    <PackageReference Include="JsonSchema.Net" Version="7.3.4" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.8" />
     <PackageReference Include="ModelContextProtocol" Version="1.4.0" />
   </ItemGroup>

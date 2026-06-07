@@ -42,7 +42,7 @@ public sealed class SettingsStore
         lock (_gate)
         {
             _current = settings;
-            try { File.WriteAllText(_path, Json.Serialize(settings)); }
+            try { File.WriteAllText(_path, PlexusJson.Serialize(settings)); }
             catch { /* best-effort; in-memory value still applies this session */ }
         }
     }
@@ -53,7 +53,7 @@ public sealed class SettingsStore
         {
             if (File.Exists(_path))
             {
-                var loaded = Json.Deserialize<AppSettings>(File.ReadAllText(_path));
+                var loaded = PlexusJson.Deserialize<AppSettings>(File.ReadAllText(_path));
                 if (loaded is not null)
                 {
                     if (loaded.ConfirmTimeoutSeconds <= 0) loaded.ConfirmTimeoutSeconds = 120;

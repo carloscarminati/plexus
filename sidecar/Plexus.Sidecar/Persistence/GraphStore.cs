@@ -155,7 +155,7 @@ public sealed class GraphStore
         cmd.Parameters.AddWithValue("$id", graph.Id);
         cmd.Parameters.AddWithValue("$title", (object?)graph.Title ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$createdAt", DateTimeOffset.UtcNow.ToString("o"));
-        cmd.Parameters.AddWithValue("$policy", Json.Serialize(graph.DefaultPolicy));
+        cmd.Parameters.AddWithValue("$policy", PlexusJson.Serialize(graph.DefaultPolicy));
         cmd.ExecuteNonQuery();
         return graph;
     }
@@ -165,7 +165,7 @@ public sealed class GraphStore
         using var conn = Open();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = "UPDATE graphs SET policy_json = $policy WHERE id = $id;";
-        cmd.Parameters.AddWithValue("$policy", Json.Serialize(policy));
+        cmd.Parameters.AddWithValue("$policy", PlexusJson.Serialize(policy));
         cmd.Parameters.AddWithValue("$id", graphId);
         cmd.ExecuteNonQuery();
     }
@@ -185,7 +185,7 @@ public sealed class GraphStore
                 return null;
             title = greader.IsDBNull(0) ? null : greader.GetString(0);
             if (!greader.IsDBNull(1))
-                policy = Json.Deserialize<RoutingPolicy>(greader.GetString(1));
+                policy = PlexusJson.Deserialize<RoutingPolicy>(greader.GetString(1));
         }
 
         var graph = new Graph { Id = graphId, Title = title, DefaultPolicy = policy };
@@ -206,10 +206,10 @@ public sealed class GraphStore
                     ParentId = reader.IsDBNull(1) ? null : reader.GetString(1),
                     Role = reader.GetString(2),
                     CreatedAt = reader.GetString(3),
-                    Blocks = Json.Deserialize<List<Block>>(reader.GetString(4)) ?? new(),
+                    Blocks = PlexusJson.Deserialize<List<Block>>(reader.GetString(4)) ?? new(),
                     Raw = reader.GetString(5),
-                    Meta = reader.IsDBNull(6) ? null : Json.Deserialize<NodeMeta>(reader.GetString(6)),
-                    MergeParents = reader.IsDBNull(7) ? null : Json.Deserialize<List<string>>(reader.GetString(7)),
+                    Meta = reader.IsDBNull(6) ? null : PlexusJson.Deserialize<NodeMeta>(reader.GetString(6)),
+                    MergeParents = reader.IsDBNull(7) ? null : PlexusJson.Deserialize<List<string>>(reader.GetString(7)),
                 };
                 graph.Nodes.Add(node);
                 if (node.ParentId is not null)
@@ -236,10 +236,10 @@ public sealed class GraphStore
         cmd.Parameters.AddWithValue("$parent", (object?)node.ParentId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$role", node.Role);
         cmd.Parameters.AddWithValue("$createdAt", node.CreatedAt);
-        cmd.Parameters.AddWithValue("$blocks", Json.Serialize(node.Blocks));
+        cmd.Parameters.AddWithValue("$blocks", PlexusJson.Serialize(node.Blocks));
         cmd.Parameters.AddWithValue("$raw", node.Raw);
-        cmd.Parameters.AddWithValue("$meta", node.Meta is null ? DBNull.Value : Json.Serialize(node.Meta));
-        cmd.Parameters.AddWithValue("$merge", node.MergeParents is null ? DBNull.Value : Json.Serialize(node.MergeParents));
+        cmd.Parameters.AddWithValue("$meta", node.Meta is null ? DBNull.Value : PlexusJson.Serialize(node.Meta));
+        cmd.Parameters.AddWithValue("$merge", node.MergeParents is null ? DBNull.Value : PlexusJson.Serialize(node.MergeParents));
         cmd.ExecuteNonQuery();
     }
 }
