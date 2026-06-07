@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using Anthropic;
 using Anthropic.Models.Messages;
@@ -23,6 +24,7 @@ public sealed record TurnResult(List<Block> Blocks, string Raw, int? TokensIn, i
 // hardening pass can move this to a constrained tool / structured output.
 public sealed class AnthropicTurnService
 {
+    private const int MaxToolRounds = 8; // safety cap on tool-use rounds per turn
     private readonly AnthropicClient _client;
 
     public AnthropicTurnService(string apiKey)
@@ -30,71 +32,124 @@ public sealed class AnthropicTurnService
         _client = new AnthropicClient { ApiKey = apiKey };
     }
 
-    // The model is chosen by the router (see ConversationService) and passed in.
-    public async Task<TurnResult> CompleteAsync(TurnRequest request, string modelId, CancellationToken ct = default)
-    {
-        // Prompt-prefix caching (spec P1): cache the stable system prompt, and the
-        // tail of the shared ancestor prefix. The last history entry is the new,
-        // divergent user message — so the cache breakpoint goes on the entry before
-        // it (Count-2). Sibling branches share that prefix and read it from cache.
-        var history = request.History;
-        var breakpoint = history.Count - 2; // -1 when there's nothing to cache yet
+    // Executes one tool call (the host call + the human gate live in the executor,
+    // provided by ConversationService). Returns the tool result text fed back to
+    // the model.
+    public delegate Task<string> ToolExecutor(string toolUseId, string toolName, JsonElement args, CancellationToken ct);
 
+    // The model is chosen by the router (see ConversationService) and passed in.
+    // When `tools` is non-empty this runs an agentic loop: model → tool_use →
+    // executor (gated) → tool_result → model, until the model stops calling tools.
+    public async Task<TurnResult> CompleteAsync(
+        TurnRequest request,
+        string modelId,
+        IReadOnlyList<Tool>? tools = null,
+        ToolExecutor? executeTool = null,
+        CancellationToken ct = default)
+    {
+        // Prompt-prefix caching (spec P1): cache the stable system prompt and the
+        // tail of the shared ancestor prefix (the entry before the new user turn).
+        var history = request.History;
+        var breakpoint = history.Count - 2;
         var messages = new List<MessageParam>(history.Count);
         for (var i = 0; i < history.Count; i++)
         {
             var (role, content) = history[i];
             var roleEnum = role == "assistant" ? Role.Assistant : Role.User;
             messages.Add(i == breakpoint
-                ? new MessageParam
-                {
-                    Role = roleEnum,
-                    Content = new List<ContentBlockParam>
-                    {
-                        new TextBlockParam { Text = content, CacheControl = new CacheControlEphemeral() },
-                    },
-                }
+                ? new MessageParam { Role = roleEnum, Content = new List<ContentBlockParam> { new TextBlockParam { Text = content, CacheControl = new CacheControlEphemeral() } } }
                 : new MessageParam { Role = roleEnum, Content = content });
         }
 
-        // Adaptive thinking + effort are supported on Opus 4.6+ and Sonnet 4.6,
-        // but NOT on Haiku 4.5 (or other tiers) — sending them there 400s. Gate by
-        // model so the router can pick a small model without breaking the call.
+        // Adaptive thinking + effort: Opus 4.6+ / Sonnet 4.6 only (400 on Haiku 4.5).
         var advanced = modelId.Contains("opus", StringComparison.OrdinalIgnoreCase)
                        || modelId.Contains("sonnet-4-6", StringComparison.OrdinalIgnoreCase);
+        var toolUnions = tools is { Count: > 0 } ? tools.Select(t => (ToolUnion)t).ToList() : null;
 
-        var parameters = new MessageCreateParams
+        var transcript = new StringBuilder();
+        int tokensIn = 0, tokensOut = 0;
+        var round = 0;
+        var cappedOut = false;
+        Message response;
+
+        while (true)
         {
-            Model = modelId,
-            MaxTokens = 16000,
-            System = new List<TextBlockParam>
+            var parameters = new MessageCreateParams
             {
-                new() { Text = SystemPrompt.Text, CacheControl = new CacheControlEphemeral() },
-            },
-            Thinking = advanced ? new ThinkingConfigAdaptive() : (ThinkingConfigParam?)null,
-            OutputConfig = advanced ? new OutputConfig { Effort = Effort.High } : null,
-            Messages = messages,
-        };
+                Model = modelId,
+                MaxTokens = 16000,
+                System = new List<TextBlockParam>
+                {
+                    new() { Text = SystemPrompt.Text, CacheControl = new CacheControlEphemeral() },
+                },
+                Thinking = advanced ? new ThinkingConfigAdaptive() : (ThinkingConfigParam?)null,
+                OutputConfig = advanced ? new OutputConfig { Effort = Effort.High } : null,
+                Messages = messages,
+                Tools = toolUnions,
+                // One tool call per round: makes the round cap a real bound and lets
+                // the safety gate confirm each side-effecting call individually.
+                ToolChoice = toolUnions is not null ? new ToolChoiceAuto { DisableParallelToolUse = true } : null,
+            };
 
-        var response = await _client.Messages.Create(parameters, cancellationToken: ct);
+            response = await _client.Messages.Create(parameters, cancellationToken: ct);
+            if (response.Usage is { } u)
+            {
+                tokensIn += (int)u.InputTokens;
+                tokensOut += (int)u.OutputTokens;
+                Console.WriteLine($"[plexus] tokens in={u.InputTokens} out={u.OutputTokens} cacheRead={u.CacheReadInputTokens} cacheWrite={u.CacheCreationInputTokens}");
+            }
 
-        if (response.Usage is { } usage)
-        {
-            Console.WriteLine(
-                $"[plexus] tokens in={usage.InputTokens} out={usage.OutputTokens} " +
-                $"cacheRead={usage.CacheReadInputTokens} cacheWrite={usage.CacheCreationInputTokens}");
+            if (response.StopReason != "tool_use" || toolUnions is null || executeTool is null)
+                break;
+
+            // Guard: cap tool-use rounds per turn. On the cap we stop cleanly (no
+            // error) and return whatever the model has produced so far.
+            if (round >= MaxToolRounds)
+            {
+                cappedOut = true;
+                transcript.AppendLine($"- (stopped: reached the {MaxToolRounds}-round tool-call limit)");
+                break;
+            }
+            round++;
+
+            // Echo the assistant turn (preserving thinking signatures) + run each tool.
+            var assistantContent = new List<ContentBlockParam>();
+            var toolResults = new List<ContentBlockParam>();
+            foreach (var block in response.Content)
+            {
+                if (block.TryPickText(out var tb))
+                    assistantContent.Add(new TextBlockParam { Text = tb.Text });
+                else if (block.TryPickThinking(out var th))
+                    assistantContent.Add(new ThinkingBlockParam { Thinking = th.Thinking, Signature = th.Signature });
+                else if (block.TryPickRedactedThinking(out var rt))
+                    assistantContent.Add(new RedactedThinkingBlockParam { Data = rt.Data });
+                else if (block.TryPickToolUse(out var tu))
+                {
+                    assistantContent.Add(new ToolUseBlockParam { ID = tu.ID, Name = tu.Name, Input = tu.Input });
+                    var argsJson = JsonSerializer.SerializeToElement(tu.Input);
+                    var resultText = await executeTool(tu.ID, tu.Name, argsJson, ct);
+                    transcript.AppendLine($"- {tu.Name}({argsJson.GetRawText()}) → {Truncate(resultText, 240)}");
+                    toolResults.Add(new ToolResultBlockParam { ToolUseID = tu.ID, Content = resultText });
+                }
+            }
+            messages.Add(new MessageParam { Role = Role.Assistant, Content = assistantContent });
+            messages.Add(new MessageParam { Role = Role.User, Content = toolResults });
         }
 
-        var raw = string.Concat(
-            response.Content.Select(b => b.Value).OfType<TextBlock>().Select(t => t.Text));
-
+        var raw = string.Concat(response.Content.Select(b => b.Value).OfType<TextBlock>().Select(t => t.Text));
+        if (cappedOut && string.IsNullOrWhiteSpace(raw))
+            raw = $"Stopped after reaching the {MaxToolRounds}-round tool-call limit for this turn.";
         var blocks = ParseBlocks(raw);
 
-        int? tokensIn = response.Usage is { } u ? (int)u.InputTokens : null;
-        int? tokensOut = response.Usage is { } u2 ? (int)u2.OutputTokens : null;
+        // Keep `raw` faithful for resume (spec §4.4): include the tool transcript so a
+        // resumed branch replays what tools were called and what they returned.
+        var fullRaw = transcript.Length > 0 ? $"[tool calls]\n{transcript}[answer]\n{raw}" : raw;
 
-        return new TurnResult(blocks, raw, tokensIn, tokensOut);
+        return new TurnResult(blocks, fullRaw, tokensIn, tokensOut);
     }
+
+    private static string Truncate(string s, int max) =>
+        s.Length <= max ? s : s[..max] + "…";
 
     // Try strategy (a): parse the JSON {"blocks":[...]}. Fall back to (b).
     public static List<Block> ParseBlocks(string raw)

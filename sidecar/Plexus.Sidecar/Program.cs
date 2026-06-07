@@ -1,3 +1,4 @@
+using Plexus.Sidecar.Mcp;
 using Plexus.Sidecar.Model;
 using Plexus.Sidecar.Persistence;
 using Plexus.Sidecar.Routing;
@@ -26,6 +27,10 @@ builder.Services.AddSingleton<IModelRouter, CompositeRouter>();
 builder.Services.AddSingleton<ITelemetrySink>(sp =>
     new SqliteTelemetrySink(sp.GetRequiredService<ILogger<SqliteTelemetrySink>>()));
 builder.Services.AddHostedService<RegistryRefreshService>();
+
+// MCP host (M0): connects only to user-configured registry servers.
+builder.Services.AddSingleton<KeychainService>();
+builder.Services.AddSingleton<McpHost>();
 
 // Resolve the API key once at startup; it never leaves the sidecar. Conversation
 // services are only registered when a key is present — without one the app still
@@ -63,6 +68,10 @@ app.Map("/ws", async (HttpContext context) =>
         logger);
     await hub.RunAsync(context.RequestAborted);
 });
+
+// Connect configured MCP servers before serving (per-server failures are logged
+// and skipped inside ConnectAllAsync — a bad server never blocks startup).
+await app.Services.GetRequiredService<McpHost>().ConnectAllAsync();
 
 logger.LogInformation("Plexus sidecar listening on ws://127.0.0.1:8765/ws");
 app.Run();

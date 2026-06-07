@@ -90,7 +90,18 @@ export interface Node {
     latencyMs?: number;
     reason?: string; // why this model was picked (router)
     policy?: string; // canonical effective policy ("auto:cost", "manual:<id>")
+    toolCalls?: ToolCallRecord[]; // M0: MCP tool invocations during this turn (transparency)
   };
+}
+
+// A single MCP tool invocation within an assistant turn (shown in the node).
+export interface ToolCallRecord {
+  serverId: string;
+  tool: string;
+  args: unknown;
+  resultSummary: string;
+  readOnly: boolean;
+  approved: boolean; // false if the user denied a gated call
 }
 
 export interface Graph {
@@ -108,6 +119,18 @@ export type RoutingObjective = "cost" | "quality" | "balanced";
 export type RoutingPolicy =
   | { kind: "manual"; modelId: string }
   | { kind: "auto"; objective: RoutingObjective; budgetPerTurn?: number };
+
+// ── MCP host (M0) — see docs/spec-mcp-host.md ───────────────────────────────
+
+export interface McpServerConfig {
+  id: string;
+  name: string;
+  transport:
+    | { kind: "stdio"; command: string; args: string[]; env?: Record<string, string> }
+    | { kind: "http"; url: string }; // credentials via keychain (by id), NEVER inline
+  enabled: boolean;
+  toolPolicy?: "auto" | "confirm-destructive" | "confirm-all"; // default: confirm anything not read-only
+}
 
 // One curated candidate model (NOT the full models.dev catalog) for the picker.
 export interface ModelInfo {
@@ -137,7 +160,9 @@ export type ClientEvent =
   // R1 — persist the session default routing policy.
   | { type: "set_session_policy"; graphId: string; policy: RoutingPolicy }
   // R1 — request the curated candidate set.
-  | { type: "list_models" };
+  | { type: "list_models" }
+  // M0 — the user's decision on a gated MCP tool call.
+  | { type: "tool_confirmation"; toolUseId: string; approved: boolean };
 
 export type ServerEvent =
   | { type: "graphs"; graphs: { id: string; title?: string }[] }
@@ -149,4 +174,15 @@ export type ServerEvent =
   | { type: "turn_completed"; node: Node }
   // R1 — the curated candidate models for the Manual picker.
   | { type: "models"; models: ModelInfo[] }
+  // M0 — the host needs the user to approve a non-read-only MCP tool call before executing.
+  | {
+      type: "tool_confirmation_request";
+      nodeId: string; // the in-flight assistant node
+      toolUseId: string;
+      serverId: string;
+      serverName: string;
+      tool: string;
+      args: unknown;
+      readOnly: boolean;
+    }
   | { type: "error"; message: string };

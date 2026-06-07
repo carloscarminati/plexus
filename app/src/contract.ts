@@ -77,7 +77,17 @@ export interface Node {
     latencyMs?: number;
     reason?: string;
     policy?: string; // canonical effective policy ("auto:cost", "manual:<id>")
+    toolCalls?: ToolCallRecord[]; // M0: MCP tool invocations during this turn
   };
+}
+
+export interface ToolCallRecord {
+  serverId: string;
+  tool: string;
+  args: unknown;
+  resultSummary: string;
+  readOnly: boolean;
+  approved: boolean;
 }
 
 export interface Graph {
@@ -114,7 +124,8 @@ export type ClientEvent =
   | { type: "send_message"; graphId: string; fromNodeId: string | null; fromNodeIds?: string[]; text: string; policy?: RoutingPolicy }
   | { type: "intent"; graphId: string; nodeId: string; kind: string; payload: unknown; policy?: RoutingPolicy }
   | { type: "set_session_policy"; graphId: string; policy: RoutingPolicy }
-  | { type: "list_models" };
+  | { type: "list_models" }
+  | { type: "tool_confirmation"; toolUseId: string; approved: boolean };
 
 export type ServerEvent =
   | { type: "graphs"; graphs: { id: string; title?: string }[] }
@@ -124,4 +135,14 @@ export type ServerEvent =
   | { type: "turn_delta"; nodeId: string; blocks: Block[] }
   | { type: "turn_completed"; node: Node }
   | { type: "models"; models: ModelInfo[] }
+  | {
+      type: "tool_confirmation_request";
+      nodeId: string;
+      toolUseId: string;
+      serverId: string;
+      serverName: string;
+      tool: string;
+      args: unknown;
+      readOnly: boolean;
+    }
   | { type: "error"; message: string };

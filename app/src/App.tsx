@@ -22,6 +22,8 @@ function App() {
     setSessionPolicy,
     nodeOverrides,
     setNodeOverride,
+    confirm,
+    respondConfirm,
     sendMessage,
     sendChoice,
   } = useSidecar();
@@ -107,6 +109,25 @@ function App() {
                   />
                   {selected.meta?.reason && <span className="branch-reason">{selected.meta.reason}</span>}
                 </div>
+                {selected.meta?.toolCalls && selected.meta.toolCalls.length > 0 && (
+                  <div className="tool-calls">
+                    <div className="tool-calls-head">tool calls</div>
+                    {selected.meta.toolCalls.map((tc, i) => (
+                      <div key={i} className={`tool-call ${tc.approved ? "" : "denied"}`}>
+                        <div className="tool-call-head">
+                          <span className="tool-call-name">🔧 {tc.tool}</span>
+                          <span className="tool-call-tags">
+                            <span className="tool-chip">{tc.serverId}</span>
+                            <span className="tool-chip">{tc.readOnly ? "read-only" : "side-effecting"}</span>
+                            {!tc.approved && <span className="tool-chip denied">denied</span>}
+                          </span>
+                        </div>
+                        <div className="tool-call-args">{JSON.stringify(tc.args)}</div>
+                        <div className="tool-call-result">{tc.resultSummary}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <div className="detail-blocks">
                   {selected.blocks.map((block, i) => (
                     <BlockView
@@ -163,6 +184,28 @@ function App() {
           </form>
         </aside>
       </div>
+
+      {confirm && (
+        <div className="confirm-overlay">
+          <div className="confirm-card">
+            <div className="confirm-title">Approve tool call?</div>
+            <div className="confirm-sub">
+              The model wants to run a {confirm.readOnly ? "read-only" : "side-effecting"} tool on{" "}
+              <strong>{confirm.serverName || confirm.serverId}</strong>.
+            </div>
+            <div className="confirm-tool">🔧 {confirm.tool}</div>
+            <pre className="confirm-args">{JSON.stringify(confirm.args, null, 2)}</pre>
+            <div className="confirm-actions">
+              <button className="confirm-deny" onClick={() => respondConfirm(false)}>
+                Deny
+              </button>
+              <button className="confirm-approve" onClick={() => respondConfirm(true)}>
+                Approve &amp; run
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

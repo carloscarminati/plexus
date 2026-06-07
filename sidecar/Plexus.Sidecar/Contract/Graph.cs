@@ -26,6 +26,18 @@ public sealed class NodeMeta
     public long? LatencyMs { get; set; }
     public string? Reason { get; set; }  // why this model was picked (router)
     public string? Policy { get; set; }  // canonical effective policy ("auto:cost", "manual:<id>")
+    public List<ToolCallRecord>? ToolCalls { get; set; } // M0: MCP tool invocations this turn
+}
+
+// A single MCP tool invocation within an assistant turn (shown in the node).
+public sealed class ToolCallRecord
+{
+    public string ServerId { get; set; } = "";
+    public string Tool { get; set; } = "";
+    public System.Text.Json.JsonElement Args { get; set; }
+    public string ResultSummary { get; set; } = "";
+    public bool ReadOnly { get; set; }
+    public bool Approved { get; set; }
 }
 
 public sealed class Edge

@@ -20,6 +20,8 @@ export function useSidecar() {
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [sessionPolicy, setSessionPolicyState] = useState<RoutingPolicy>({ kind: "manual", modelId: "claude-opus-4-8" });
   const [nodeOverrides, setNodeOverrides] = useState<Record<string, RoutingPolicy>>({});
+  // M0: a pending MCP tool-confirmation request (host is waiting on the user).
+  const [confirm, setConfirm] = useState<Extract<ServerEvent, { type: "tool_confirmation_request" }> | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
 
   const send = useCallback((event: ClientEvent) => {
@@ -56,9 +58,13 @@ export function useSidecar() {
         case "models":
           setModels(msg.models);
           break;
+        case "tool_confirmation_request":
+          setConfirm(msg);
+          break;
         case "error":
           setError(msg.message);
           setPending(null);
+          setConfirm(null); // a cancelled/timed-out turn clears any open confirmation
           break;
       }
     };
@@ -146,6 +152,16 @@ export function useSidecar() {
     [graph, send],
   );
 
+  const respondConfirm = useCallback(
+    (approved: boolean) => {
+      setConfirm((c) => {
+        if (c) send({ type: "tool_confirmation", toolUseId: c.toolUseId, approved });
+        return null;
+      });
+    },
+    [send],
+  );
+
   const setNodeOverride = useCallback((nodeId: string, policy: RoutingPolicy | null) => {
     setNodeOverrides((prev) => {
       const next = { ...prev };
@@ -168,6 +184,8 @@ export function useSidecar() {
     setSessionPolicy,
     nodeOverrides,
     setNodeOverride,
+    confirm,
+    respondConfirm,
     sendMessage,
     sendChoice,
   };

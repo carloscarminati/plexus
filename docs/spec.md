@@ -196,6 +196,7 @@ This is the standard ancestor-walk used by existing canvas chats. The merge case
 - [ ] Optional: expose Plexus's own MCP server.
 
 ### Divergences from this spec (reported, not silently changed)
+- **Execution is Anthropic-first.** Although the design calls for provider-agnostic execution (each provider a `Microsoft.Extensions.AI.IChatClient`), turn execution currently runs the **Anthropic SDK** path directly. The router *selects* across providers, but **multi-provider `IChatClient` dispatch and a provider-generic tool-use loop are DEFERRED.** MCP tools (M0) are therefore driven through the Anthropic tool-use loop. Tracked in #N (TODO: link issue).
 - **Strategy (a) mechanism.** §4.2 prefers the provider's structured-output / tool mechanism; it is implemented as **prompt-guided JSON** because strict structured outputs can't express the open-keyed `table.rows` map. Schema validation + the (b) fallback still apply. *(documented in [sidecar.md](sidecar.md))*
 - **Graph reload UI.** Persistence and `LoadGraph` exist, but the app creates a fresh graph on launch and has no UI to reopen a stored graph yet.
 

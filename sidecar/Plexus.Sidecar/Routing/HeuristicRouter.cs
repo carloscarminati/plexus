@@ -15,46 +15,43 @@ public sealed partial class HeuristicRouter : IModelRouter
 
     public HeuristicRouter(ModelRegistry registry) => _registry = registry;
 
-    public Task<ModelChoice> SelectModelAsync(RoutingContext ctx, CancellationToken ct = default)
+    public Task<ModelChoice> SelectModelAsync(RoutingContext ctx, CancellationToken ct = default) =>
+        Task.FromResult(SelectFrom(CandidateSet.Build(_registry), ctx));
+
+    // Pure selection over a candidate list (also the unit-test seam for the M0
+    // negative routing test). Step 1: hard capability filter. Step 2: optimize by
+    // policy among survivors.
+    public static ModelChoice SelectFrom(IReadOnlyList<CandidateSet.Candidate> candidates, RoutingContext ctx)
     {
         var objective = ctx.Policy.Objective ?? "balanced";
-        var candidates = CandidateSet.Build(_registry);
 
-        // Step 1 — hard capability filter (unknown metadata is allowed through;
-        // the capability flags we can't see we can't rule on).
+        // Unknown metadata is allowed through (flags we can't see we can't rule on).
         var survivors = candidates
             .Where(c => c.Meta is null || ManualRouter.Unmet(c.Meta, ctx.Requires).Count == 0)
             .ToList();
 
         if (survivors.Count == 0)
         {
-            // Nothing capable — last resort: the largest candidate, flagged.
-            var fallback = candidates.OrderByDescending(c => c.Tier).FirstOrDefault();
-            if (fallback is null)
-                throw new InvalidOperationException("No candidate models configured.");
-            return Done(fallback, $"auto/{objective}: no capable model — using {fallback.ModelId} (warning)");
+            var fallback = candidates.OrderByDescending(c => c.Tier).FirstOrDefault()
+                ?? throw new InvalidOperationException("No candidate models configured.");
+            return new ModelChoice(fallback.ModelId, fallback.ProviderId, $"auto/{objective}: no capable model — using {fallback.ModelId} (warning)");
         }
 
         var (floor, signals) = ComplexityTier(ctx);
-
         var choice = objective switch
         {
             "cost" => PickCheapest(survivors, ctx),
             "quality" => PickHighest(survivors),
-            _ => PickBalanced(survivors, floor, ctx), // "balanced" (default)
+            _ => PickBalanced(survivors, floor, ctx),
         };
-
         var reason = objective switch
         {
             "cost" => $"auto/cost: cheapest capable ({choice.ModelId})",
             "quality" => $"auto/quality: top tier ({choice.ModelId})",
             _ => $"auto/balanced: tier={floor.ToString().ToLowerInvariant()} for {signals} ({choice.ModelId})",
         };
-        return Done(choice, reason);
+        return new ModelChoice(choice.ModelId, choice.ProviderId, reason);
     }
-
-    private Task<ModelChoice> Done(CandidateSet.Candidate c, string reason) =>
-        Task.FromResult(new ModelChoice(c.ModelId, c.ProviderId, reason));
 
     private static CandidateSet.Candidate PickCheapest(List<CandidateSet.Candidate> s, RoutingContext ctx) =>
         s.OrderBy(c => EstTurnCost(c, ctx)).ThenBy(c => c.Tier).First();

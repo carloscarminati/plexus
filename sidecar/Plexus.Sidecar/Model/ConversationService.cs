@@ -1,11 +1,20 @@
 using System.Diagnostics;
+using System.Text.Json;
+using ModelContextProtocol.Client;
 using Plexus.Sidecar.Contract;
+using Plexus.Sidecar.Mcp;
 using Plexus.Sidecar.Model;
 using Plexus.Sidecar.Persistence;
 using Plexus.Sidecar.Routing;
 using Plexus.Sidecar.Services;
+using AnthropicTool = Anthropic.Models.Messages.Tool;
 
 namespace Plexus.Sidecar.Model;
+
+// Surfaced to the WebSocket layer so it can show the user a tool call and await
+// their decision before the host executes it (M0 §3.2).
+public sealed record ToolConfirmRequest(
+    string NodeId, string ToolUseId, string ServerId, string ServerName, string Tool, JsonElement Args, bool ReadOnly);
 
 // Orchestrates a turn: persist the user node, reconstruct context by walking
 // ancestors (spec §4.4), pick a model via the router, call it, enrich link
@@ -23,6 +32,7 @@ public sealed class ConversationService
     private readonly IModelRouter _router;
     private readonly ModelRegistry _registry;
     private readonly ITelemetrySink _telemetry;
+    private readonly Mcp.McpHost _mcp;
 
     public ConversationService(
         GraphStore store,
@@ -30,7 +40,8 @@ public sealed class ConversationService
         LinkCardResolver linkCards,
         IModelRouter router,
         ModelRegistry registry,
-        ITelemetrySink telemetry)
+        ITelemetrySink telemetry,
+        Mcp.McpHost mcp)
     {
         _store = store;
         _turns = turns;
@@ -38,6 +49,7 @@ public sealed class ConversationService
         _router = router;
         _registry = registry;
         _telemetry = telemetry;
+        _mcp = mcp;
     }
 
     public async Task RunTurnAsync(
@@ -47,6 +59,7 @@ public sealed class ConversationService
         Func<ServerEvent, Task> emit,
         RoutingPolicy? requestedPolicy = null,
         IReadOnlyList<string>? fromNodeIds = null,
+        Func<ToolConfirmRequest, Task<bool>>? confirmTool = null,
         CancellationToken ct = default)
     {
         var graph = _store.LoadGraph(graphId)
@@ -83,8 +96,21 @@ public sealed class ConversationService
         // 3. Reconstruct context: ancestors of the user node, oldest first.
         var history = BuildHistory(graph, userNode.Id);
 
+        // 3b. MCP tools (M0): expose discovered tools to the model under a unique
+        //     "{server}_{tool}" name. If any tool is available the turn requires a
+        //     tool-capable model (drives R1's capability filter).
+        var toolMap = new Dictionary<string, McpToolRef>();
+        var anthropicTools = new List<AnthropicTool>();
+        foreach (var t in _mcp.Tools)
+        {
+            var exposed = ExposedToolName(t, toolMap.Keys);
+            toolMap[exposed] = t;
+            anthropicTools.Add(ToAnthropicTool(exposed, t.Tool));
+        }
+
         // 4. Resolve the effective policy and pick a model.
         var requires = new RequestRequirements(
+            ToolCall: anthropicTools.Count > 0,
             StructuredOutput: true, // always — block emission strategy (a), docs/spec.md §4.2
             MinContext: EstimateTokens(history));
 
@@ -111,9 +137,44 @@ public sealed class ConversationService
             choice = await _router.SelectModelAsync(new RoutingContext(history, requires, effective), ct);
         }
 
-        // 5. Call the model, measuring latency.
+        // 5. Call the model, measuring latency. The executor runs MCP tools through
+        //    the safety gate (M0 §3.2): read-only auto-runs; anything else (or a
+        //    confirm-all server) needs explicit user confirmation before execution.
+        var toolCalls = new List<ToolCallRecord>();
+
+        async Task<string> ExecuteTool(string toolUseId, string toolName, JsonElement args, CancellationToken c)
+        {
+            if (!toolMap.TryGetValue(toolName, out var t))
+                return $"[error] unknown tool '{toolName}'.";
+
+            var readOnly = t.ReadOnly;
+            // Conservative floor: confirm anything not explicitly read-only.
+            // `confirm-all` tightens to confirm everything; no policy loosens below this.
+            var needConfirm = string.Equals(t.ServerPolicy, "confirm-all", StringComparison.OrdinalIgnoreCase) || !readOnly;
+
+            var approved = true;
+            if (needConfirm)
+                approved = confirmTool is not null &&
+                    await confirmTool(new ToolConfirmRequest(assistantId, toolUseId, t.ServerId, t.ServerName, t.Tool.Name, args, readOnly));
+
+            if (!approved)
+            {
+                toolCalls.Add(new ToolCallRecord { ServerId = t.ServerId, Tool = t.Tool.Name, Args = args, ResultSummary = "(denied by the user)", ReadOnly = readOnly, Approved = false });
+                return "The user denied this tool call. Do not retry it; continue without it.";
+            }
+
+            var resultText = await _mcp.CallAsync(t.ServerId, t.Tool.Name, ToArgsDict(args), c);
+            toolCalls.Add(new ToolCallRecord { ServerId = t.ServerId, Tool = t.Tool.Name, Args = args, ResultSummary = TruncateText(resultText, 400), ReadOnly = readOnly, Approved = true });
+            return resultText;
+        }
+
+        IReadOnlyList<AnthropicTool>? toolList = anthropicTools.Count > 0 ? anthropicTools : null;
+        AnthropicTurnService.ToolExecutor? executor = null;
+        if (anthropicTools.Count > 0)
+            executor = ExecuteTool;
+
         var sw = Stopwatch.StartNew();
-        var result = await _turns.CompleteAsync(new TurnRequest(history), choice.ModelId, ct);
+        var result = await _turns.CompleteAsync(new TurnRequest(history), choice.ModelId, toolList, executor, ct);
         sw.Stop();
 
         // 6. Resolve OG images for any link cards (server-side, spec P0).
@@ -145,11 +206,59 @@ public sealed class ConversationService
                 LatencyMs = sw.ElapsedMilliseconds,
                 Reason = choice.Reason,
                 Policy = canonical,
+                ToolCalls = toolCalls.Count > 0 ? toolCalls : null,
             },
         };
         _store.AddNode(graphId, assistantNode);
         await emit(new TurnCompletedServerEvent { Node = assistantNode });
     }
+
+    private static readonly char[] _exposedTrim = { '_' };
+
+    // Unique, model-safe tool name: "{server}_{tool}" sanitized to [A-Za-z0-9_], ≤64 chars.
+    private static string ExposedToolName(McpToolRef t, IEnumerable<string> taken)
+    {
+        string Sani(string s) => new string(s.Select(ch => char.IsLetterOrDigit(ch) ? ch : '_').ToArray());
+        var baseName = (Sani(t.ServerId) + "_" + Sani(t.Tool.Name)).Trim(_exposedTrim);
+        if (baseName.Length > 64) baseName = baseName[..64];
+        var set = new HashSet<string>(taken);
+        var name = baseName;
+        for (var i = 1; set.Contains(name); i++)
+            name = $"{baseName[..Math.Min(baseName.Length, 60)]}_{i}";
+        return name;
+    }
+
+    private static AnthropicTool ToAnthropicTool(string name, McpClientTool t)
+    {
+        var props = new Dictionary<string, JsonElement>();
+        List<string>? required = null;
+        var schema = t.JsonSchema;
+        if (schema.ValueKind == JsonValueKind.Object)
+        {
+            if (schema.TryGetProperty("properties", out var p) && p.ValueKind == JsonValueKind.Object)
+                foreach (var prop in p.EnumerateObject())
+                    props[prop.Name] = prop.Value;
+            if (schema.TryGetProperty("required", out var r) && r.ValueKind == JsonValueKind.Array)
+                required = r.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.String).Select(x => x.GetString()!).ToList();
+        }
+        return new AnthropicTool
+        {
+            Name = name,
+            Description = string.IsNullOrEmpty(t.Description) ? t.Name : t.Description,
+            InputSchema = new() { Properties = props, Required = required },
+        };
+    }
+
+    private static Dictionary<string, JsonElement> ToArgsDict(JsonElement args)
+    {
+        var d = new Dictionary<string, JsonElement>();
+        if (args.ValueKind == JsonValueKind.Object)
+            foreach (var p in args.EnumerateObject())
+                d[p.Name] = p.Value;
+        return d;
+    }
+
+    private static string TruncateText(string s, int max) => s.Length <= max ? s : s[..max] + "…";
 
     private static string Canonical(RoutingPolicy? p) =>
         p is null ? "" : p.Kind == "manual" ? $"manual:{p.ModelId}" : $"auto:{p.Objective}";

@@ -16,6 +16,7 @@ namespace Plexus.Sidecar.Contract;
 [JsonDerivedType(typeof(IntentEvent), "intent")]
 [JsonDerivedType(typeof(SetSessionPolicyEvent), "set_session_policy")]
 [JsonDerivedType(typeof(ListModelsEvent), "list_models")]
+[JsonDerivedType(typeof(ToolConfirmationEvent), "tool_confirmation")]
 public abstract class ClientEvent { }
 
 public sealed class LoadGraphEvent : ClientEvent
@@ -56,6 +57,12 @@ public sealed class SetSessionPolicyEvent : ClientEvent // R1 — persist the se
 
 public sealed class ListModelsEvent : ClientEvent { } // R1 — request the curated candidate set
 
+public sealed class ToolConfirmationEvent : ClientEvent // M0 — user's decision on a gated tool call
+{
+    public string ToolUseId { get; set; } = "";
+    public bool Approved { get; set; }
+}
+
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]
 [JsonDerivedType(typeof(GraphsServerEvent), "graphs")]
 [JsonDerivedType(typeof(GraphServerEvent), "graph")]
@@ -64,8 +71,21 @@ public sealed class ListModelsEvent : ClientEvent { } // R1 — request the cura
 [JsonDerivedType(typeof(TurnDeltaServerEvent), "turn_delta")]
 [JsonDerivedType(typeof(TurnCompletedServerEvent), "turn_completed")]
 [JsonDerivedType(typeof(ModelsServerEvent), "models")]
+[JsonDerivedType(typeof(ToolConfirmationRequestServerEvent), "tool_confirmation_request")]
 [JsonDerivedType(typeof(ErrorServerEvent), "error")]
 public abstract class ServerEvent { }
+
+// M0 — the host asks the user to approve a non-read-only MCP tool call.
+public sealed class ToolConfirmationRequestServerEvent : ServerEvent
+{
+    public string NodeId { get; set; } = "";
+    public string ToolUseId { get; set; } = "";
+    public string ServerId { get; set; } = "";
+    public string ServerName { get; set; } = "";
+    public string Tool { get; set; } = "";
+    public System.Text.Json.JsonElement Args { get; set; }
+    public bool ReadOnly { get; set; }
+}
 
 // One curated candidate model (R1), with metadata for the Manual picker.
 public sealed class ModelInfo

@@ -612,3 +612,132 @@ body {
   text-align: center;
   padding: 24px;
 }
+
+/* M0: tool calls (transparency) */
+.tool-calls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.tool-calls-head {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+.tool-call {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.tool-call.denied {
+  opacity: 0.7;
+}
+.tool-call-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.tool-call-name {
+  font-weight: 600;
+  font-size: 13px;
+}
+.tool-call-tags {
+  display: inline-flex;
+  gap: 4px;
+}
+.tool-chip {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  background: var(--panel-2);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+.tool-chip.denied {
+  color: #f08a8a;
+  background: rgba(240, 138, 138, 0.12);
+}
+.tool-call-args {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11px;
+  color: var(--muted);
+  margin: 4px 0;
+  word-break: break-all;
+}
+.tool-call-result {
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+/* M0: tool confirmation overlay (the human gate) */
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.confirm-card {
+  width: 460px;
+  max-width: 90vw;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+.confirm-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.confirm-sub {
+  color: var(--muted);
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+.confirm-tool {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.confirm-args {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  font-size: 12px;
+  max-height: 200px;
+  overflow: auto;
+  margin: 0 0 16px;
+}
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.confirm-deny,
+.confirm-approve {
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid var(--border);
+}
+.confirm-deny {
+  background: var(--panel-2);
+  color: var(--text);
+}
+.confirm-approve {
+  background: var(--accent);
+  color: #0b1020;
+  border-color: var(--accent);
+}

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
@@ -20,6 +21,14 @@ public sealed class WebSocketHub
     private readonly ConversationService? _conversation;
     private readonly ModelRegistry _registry;
     private readonly ILogger _log;
+    // Pending MCP tool confirmations, keyed by tool_use id (M0 §3.2). The turn
+    // runs in the background and awaits these; the receive loop resolves them.
+    private readonly ConcurrentDictionary<string, TaskCompletionSource<bool>> _pendingConfirms = new();
+
+    // If the user never answers a tool confirmation, the turn is cancelled rather
+    // than hanging forever. Overridable for tests via PLEXUS_CONFIRM_TIMEOUT_SECONDS.
+    private static readonly TimeSpan ConfirmTimeout = TimeSpan.FromSeconds(
+        int.TryParse(Environment.GetEnvironmentVariable("PLEXUS_CONFIRM_TIMEOUT_SECONDS"), out var s) && s > 0 ? s : 120);
 
     public WebSocketHub(WebSocket socket, GraphStore store, ConversationService? conversation, ModelRegistry registry, ILogger log)
     {
@@ -94,11 +103,20 @@ public sealed class WebSocketHub
                     });
                     break;
                 }
-                await _conversation.RunTurnAsync(sm.GraphId, sm.FromNodeId, sm.Text, SendAsync, sm.Policy, sm.FromNodeIds, ct);
+                // Run the turn in the background so the receive loop stays free to
+                // process the user's tool-confirmation reply mid-turn.
+                StartTurn(c => _conversation.RunTurnAsync(
+                    sm.GraphId, sm.FromNodeId, sm.Text, SendAsync, sm.Policy, sm.FromNodeIds,
+                    req => RequestConfirmAsync(req, c), c), ct);
                 break;
 
             case IntentEvent intent:
-                await HandleIntentAsync(intent, ct);
+                HandleIntent(intent, ct);
+                break;
+
+            case ToolConfirmationEvent tc:
+                if (_pendingConfirms.TryRemove(tc.ToolUseId, out var tcs))
+                    tcs.TrySetResult(tc.Approved);
                 break;
 
             case SetSessionPolicyEvent sp:
@@ -114,30 +132,80 @@ public sealed class WebSocketHub
     // An interactive block (currently `choices`) fired. The sidecar — not the
     // frontend — decides the next turn: we inject the chosen option as a new user
     // message and continue from the node that showed it (spec §4.4).
-    private async Task HandleIntentAsync(IntentEvent intent, CancellationToken ct)
+    private void HandleIntent(IntentEvent intent, CancellationToken ct)
     {
         if (_conversation is null)
         {
-            await SendAsync(new ErrorServerEvent { Message = "No Anthropic API key configured." });
+            _ = SendAsync(new ErrorServerEvent { Message = "No Anthropic API key configured." });
             return;
         }
-
-        if (intent.Kind == "choice")
+        if (intent.Kind != "choice")
         {
-            var text = TryGetString(intent.Payload, "label")
-                ?? TryGetString(intent.Payload, "id")
-                ?? "";
-            if (string.IsNullOrWhiteSpace(text))
-            {
-                await SendAsync(new ErrorServerEvent { Message = "Choice intent missing a label." });
-                return;
-            }
-            // Branch from the node that showed the choices.
-            await _conversation.RunTurnAsync(intent.GraphId, intent.NodeId, text, SendAsync, intent.Policy, fromNodeIds: null, ct: ct);
+            _ = SendAsync(new ErrorServerEvent { Message = $"Unknown intent kind: {intent.Kind}" });
             return;
         }
+        var text = TryGetString(intent.Payload, "label") ?? TryGetString(intent.Payload, "id") ?? "";
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            _ = SendAsync(new ErrorServerEvent { Message = "Choice intent missing a label." });
+            return;
+        }
+        // Branch from the node that showed the choices (background, like send_message).
+        StartTurn(c => _conversation.RunTurnAsync(
+            intent.GraphId, intent.NodeId, text, SendAsync, intent.Policy, null,
+            req => RequestConfirmAsync(req, c), c), ct);
+    }
 
-        await SendAsync(new ErrorServerEvent { Message = $"Unknown intent kind: {intent.Kind}" });
+    // Run a turn off the receive loop so tool-confirmation replies can be processed
+    // mid-turn. Errors are surfaced to the client.
+    private void StartTurn(Func<CancellationToken, Task> run, CancellationToken ct)
+    {
+        _ = Task.Run(async () =>
+        {
+            try { await run(ct); }
+            catch (OperationCanceledException)
+            {
+                // Confirmation timed out or the connection closed — end cleanly and
+                // tell the client (best-effort; a no-op if the socket is already gone).
+                try { await SendAsync(new ErrorServerEvent { Message = "Turn cancelled (tool confirmation not answered, or connection closed)." }); } catch { }
+            }
+            catch (Exception ex)
+            {
+                _log.LogError(ex, "Turn failed");
+                try { await SendAsync(new ErrorServerEvent { Message = ex.Message }); } catch { }
+            }
+        }, ct);
+    }
+
+    // Ask the user to approve a gated tool call, then wait for their reply (M0 §3.2).
+    // A dropped connection resolves to "denied".
+    private async Task<bool> RequestConfirmAsync(ToolConfirmRequest req, CancellationToken ct)
+    {
+        var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _pendingConfirms[req.ToolUseId] = tcs;
+        try
+        {
+            await SendAsync(new ToolConfirmationRequestServerEvent
+            {
+                NodeId = req.NodeId,
+                ToolUseId = req.ToolUseId,
+                ServerId = req.ServerId,
+                ServerName = req.ServerName,
+                Tool = req.Tool,
+                Args = req.Args,
+                ReadOnly = req.ReadOnly,
+            });
+            // User reply → true/false. No reply within ConfirmTimeout, or the
+            // connection closing (ct), → cancel the task so the turn unwinds cleanly.
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            linked.CancelAfter(ConfirmTimeout);
+            using (linked.Token.Register(() => tcs.TrySetCanceled(linked.Token)))
+                return await tcs.Task;
+        }
+        finally
+        {
+            _pendingConfirms.TryRemove(req.ToolUseId, out _);
+        }
     }
 
     // The curated candidate set (NOT the full models.dev catalog) for the

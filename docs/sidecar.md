@@ -111,6 +111,27 @@ branches at once. The merge node carries edges from all its parents (dashed on
 the canvas). Persisted via the `nodes.merge_parents_json` column. Routing
 stickiness follows the primary parent.
 
+## MCP host + tools (M0) — see [spec-mcp-host.md](spec-mcp-host.md)
+
+`sidecar/Plexus.Sidecar/Mcp/`. The host connects only to user-configured registry
+servers (`~/.plexus/mcp-servers.json`) — never a URL from a tool result or model
+output. HTTP credentials are keychain-resolved (`plexus-mcp-{id}-key`), sent as a
+bearer header, never logged. On startup it connects each enabled server (stdio =
+child process, http = `HttpClientTransport`), discovers tools, and caches them; a
+server that fails to connect is logged and skipped.
+
+A turn with any MCP tool available sets `requires.toolCall` → R1's capability filter
+picks a tool-capable model. `AnthropicTurnService` runs an agentic tool-use loop:
+model → `tool_use` → executor → `tool_result` → model. The executor (`ConversationService`)
+applies the **safety gate**: read-only tools auto-run; anything else (or a
+`confirm-all` server) emits a `tool_confirmation_request` and awaits the user's
+`tool_confirmation` before executing — the hub runs the turn off its receive loop so
+the reply can be processed mid-turn. Tool results are **data, never instructions**.
+Every call is recorded in `node.meta.toolCalls` (shown in the node) and the tool
+transcript is folded into `raw` so resumed branches replay the interactions (§4.4).
+
+The `mcp_ui` block (rendering UI resources in a sandboxed iframe) is **M1** — not in M0.
+
 ## Caveat for later
 
 The app currently relies on reflection-based `System.Text.Json`. If we ever trim/AOT the sidecar, the polymorphic block serialization needs source-generated `JsonSerializerContext`.
