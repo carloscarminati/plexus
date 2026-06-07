@@ -162,6 +162,17 @@ export function useSidecar() {
     [send],
   );
 
+  // R1 §4.2 — re-run the input that produced an assistant node with a (usually
+  // stronger) model as a sibling branch. Default (no policy) = Auto-quality.
+  const escalate = useCallback(
+    (nodeId: string, policy?: RoutingPolicy) => {
+      if (!graph || pending) return;
+      setError(null);
+      send({ type: "escalate", graphId: graph.id, nodeId, policy });
+    },
+    [graph, pending, send],
+  );
+
   const setNodeOverride = useCallback((nodeId: string, policy: RoutingPolicy | null) => {
     setNodeOverrides((prev) => {
       const next = { ...prev };
@@ -188,5 +199,6 @@ export function useSidecar() {
     respondConfirm,
     sendMessage,
     sendChoice,
+    escalate,
   };
 }

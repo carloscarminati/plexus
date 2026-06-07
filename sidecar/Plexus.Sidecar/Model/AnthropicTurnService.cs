@@ -74,22 +74,40 @@ public sealed class AnthropicTurnService
 
         while (true)
         {
-            var parameters = new MessageCreateParams
+            var system = new List<TextBlockParam>
             {
-                Model = modelId,
-                MaxTokens = 16000,
-                System = new List<TextBlockParam>
-                {
-                    new() { Text = SystemPrompt.Text, CacheControl = new CacheControlEphemeral() },
-                },
-                Thinking = advanced ? new ThinkingConfigAdaptive() : (ThinkingConfigParam?)null,
-                OutputConfig = advanced ? new OutputConfig { Effort = Effort.High } : null,
-                Messages = messages,
-                Tools = toolUnions,
-                // One tool call per round: makes the round cap a real bound and lets
-                // the safety gate confirm each side-effecting call individually.
-                ToolChoice = toolUnions is not null ? new ToolChoiceAuto { DisableParallelToolUse = true } : null,
+                new() { Text = SystemPrompt.Text, CacheControl = new CacheControlEphemeral() },
             };
+            var thinking = advanced ? new ThinkingConfigAdaptive() : (ThinkingConfigParam?)null;
+            var outputConfig = advanced ? new OutputConfig { Effort = Effort.High } : null;
+
+            // The tool fields are init-only AND the SDK tracks property presence, so
+            // assigning `ToolChoice = null` serializes `tool_choice: null` and the API
+            // 400s. The only way to OMIT it (tool-free turns) is to not set it at all —
+            // hence two construction branches.
+            var parameters = toolUnions is not null
+                ? new MessageCreateParams
+                {
+                    Model = modelId,
+                    MaxTokens = 16000,
+                    System = system,
+                    Thinking = thinking,
+                    OutputConfig = outputConfig,
+                    Messages = messages,
+                    Tools = toolUnions,
+                    // One tool call per round: makes the round cap a real bound and lets
+                    // the safety gate confirm each side-effecting call individually.
+                    ToolChoice = new ToolChoiceAuto { DisableParallelToolUse = true },
+                }
+                : new MessageCreateParams
+                {
+                    Model = modelId,
+                    MaxTokens = 16000,
+                    System = system,
+                    Thinking = thinking,
+                    OutputConfig = outputConfig,
+                    Messages = messages,
+                };
 
             response = await _client.Messages.Create(parameters, cancellationToken: ct);
             if (response.Usage is { } u)

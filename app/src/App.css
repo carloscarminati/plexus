@@ -584,6 +584,57 @@ body {
   font-style: italic;
 }
 
+/* §4.2 Escalate: re-run as a stronger sibling for side-by-side comparison */
+.escalate-box {
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.escalate-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.escalate-btn {
+  font-size: 12px;
+  padding: 4px 10px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.escalate-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+}
+.escalate-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.escalate-suggest {
+  display: block;
+  margin-top: 8px;
+  width: 100%;
+  text-align: left;
+  font-size: 11px;
+  padding: 6px 8px;
+  border: 1px dashed var(--accent);
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.escalate-suggest:hover:not(:disabled) {
+  color: var(--text);
+  border-style: solid;
+}
+.escalate-suggest:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 /* polish: GitHub link in topbar */
 .repo-link {
   display: inline-flex;

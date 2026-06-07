@@ -4,7 +4,8 @@ import { CanvasView } from "./CanvasView";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { PolicyPicker } from "./PolicyPicker";
 import { useSidecar } from "./useSidecar";
-import { formatCost } from "./format";
+import { formatCost, shortModel } from "./format";
+import type { RoutingPolicy } from "./contract";
 import { REPO_URL, APP_VERSION } from "./meta";
 import "./App.css";
 
@@ -26,14 +27,25 @@ function App() {
     respondConfirm,
     sendMessage,
     sendChoice,
+    escalate,
   } = useSidecar();
   const [draft, setDraft] = useState("");
+  // Escalate target: defaults to Auto-quality (top tier); the picker can override.
+  const [escalatePolicy, setEscalatePolicy] = useState<RoutingPolicy>({ kind: "auto", objective: "quality" });
   const detailRef = useRef<HTMLDivElement>(null);
 
   const nodes = graph?.nodes ?? [];
   const selected = nodes.find((n) => n.id === selectedId) ?? null;
   const merging = selectedIds.length >= 2; // P2 DAG merge
   const branching = !merging && selectedId != null && nodes.some((n) => n.parentId === selectedId);
+
+  // Soft suggestion (§4.2): a node auto-routed to a non-top tier can be escalated
+  // to a stronger model in one click.
+  const selTier = models.find((m) => m.id === selected?.meta?.model)?.tier;
+  const suggestEscalate =
+    selected?.role === "assistant" &&
+    (selected.meta?.policy ?? "").startsWith("auto:") &&
+    (selTier === "small" || selTier === "mid");
 
   useEffect(() => {
     detailRef.current?.scrollTo({ top: detailRef.current.scrollHeight });
@@ -109,6 +121,35 @@ function App() {
                   />
                   {selected.meta?.reason && <span className="branch-reason">{selected.meta.reason}</span>}
                 </div>
+                {selected.role === "assistant" && (
+                  <div className="escalate-box">
+                    <div className="escalate-row">
+                      <PolicyPicker
+                        label="Escalate with"
+                        value={escalatePolicy}
+                        onChange={(p) => setEscalatePolicy(p ?? { kind: "auto", objective: "quality" })}
+                        models={models}
+                      />
+                      <button
+                        className="escalate-btn"
+                        disabled={!!pending}
+                        title="Re-run this turn as a sibling branch with the chosen model — answers compared side by side"
+                        onClick={() => escalate(selected.id, escalatePolicy)}
+                      >
+                        ⬆ Escalate
+                      </button>
+                    </div>
+                    {suggestEscalate && (
+                      <button
+                        className="escalate-suggest"
+                        disabled={!!pending}
+                        onClick={() => escalate(selected.id, { kind: "auto", objective: "quality" })}
+                      >
+                        Auto picked {shortModel(selected.meta!.model!)} here — escalate to a stronger model?
+                      </button>
+                    )}
+                  </div>
+                )}
                 {selected.meta?.toolCalls && selected.meta.toolCalls.length > 0 && (
                   <div className="tool-calls">
                     <div className="tool-calls-head">tool calls</div>

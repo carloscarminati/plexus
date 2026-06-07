@@ -114,6 +114,19 @@ public sealed class WebSocketHub
                 HandleIntent(intent, ct);
                 break;
 
+            case EscalateEvent esc:
+                if (_conversation is null)
+                {
+                    await SendAsync(new ErrorServerEvent { Message = "No Anthropic API key configured." });
+                    break;
+                }
+                // Re-run the input that produced `esc.NodeId` as a sibling branch
+                // with a stronger model (R1 §4.2). Background, like send_message.
+                StartTurn(c => _conversation.EscalateTurnAsync(
+                    esc.GraphId, esc.NodeId, SendAsync, esc.Policy,
+                    req => RequestConfirmAsync(req, c), c), ct);
+                break;
+
             case ToolConfirmationEvent tc:
                 if (_pendingConfirms.TryRemove(tc.ToolUseId, out var tcs))
                     tcs.TrySetResult(tc.Approved);

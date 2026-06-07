@@ -162,7 +162,11 @@ export type ClientEvent =
   // R1 — request the curated candidate set.
   | { type: "list_models" }
   // M0 — the user's decision on a gated MCP tool call.
-  | { type: "tool_confirmation"; toolUseId: string; approved: boolean };
+  | { type: "tool_confirmation"; toolUseId: string; approved: boolean }
+  // R1 §4.2 — re-run the input that produced an assistant node with a (usually
+  // stronger) model as a SIBLING branch (same parent), for side-by-side compare.
+  // nodeId = the assistant node to escalate; context is identical to the original.
+  | { type: "escalate"; graphId: string; nodeId: string; policy?: RoutingPolicy };
 
 export type ServerEvent =
   | { type: "graphs"; graphs: { id: string; title?: string }[] }

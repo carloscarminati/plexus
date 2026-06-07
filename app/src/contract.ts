@@ -125,7 +125,10 @@ export type ClientEvent =
   | { type: "intent"; graphId: string; nodeId: string; kind: string; payload: unknown; policy?: RoutingPolicy }
   | { type: "set_session_policy"; graphId: string; policy: RoutingPolicy }
   | { type: "list_models" }
-  | { type: "tool_confirmation"; toolUseId: string; approved: boolean };
+  | { type: "tool_confirmation"; toolUseId: string; approved: boolean }
+  // R1 §4.2 — re-run the input that produced an assistant node with a (usually
+  // stronger) model as a SIBLING branch (same parent), for side-by-side compare.
+  | { type: "escalate"; graphId: string; nodeId: string; policy?: RoutingPolicy };
 
 export type ServerEvent =
   | { type: "graphs"; graphs: { id: string; title?: string }[] }

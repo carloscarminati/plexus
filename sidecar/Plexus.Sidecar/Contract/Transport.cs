@@ -17,6 +17,7 @@ namespace Plexus.Sidecar.Contract;
 [JsonDerivedType(typeof(SetSessionPolicyEvent), "set_session_policy")]
 [JsonDerivedType(typeof(ListModelsEvent), "list_models")]
 [JsonDerivedType(typeof(ToolConfirmationEvent), "tool_confirmation")]
+[JsonDerivedType(typeof(EscalateEvent), "escalate")]
 public abstract class ClientEvent { }
 
 public sealed class LoadGraphEvent : ClientEvent
@@ -61,6 +62,15 @@ public sealed class ToolConfirmationEvent : ClientEvent // M0 — user's decisio
 {
     public string ToolUseId { get; set; } = "";
     public bool Approved { get; set; }
+}
+
+// R1 §4.2 — re-run the input that produced an assistant node with a (usually
+// stronger) model as a SIBLING branch (same parent), for side-by-side compare.
+public sealed class EscalateEvent : ClientEvent
+{
+    public string GraphId { get; set; } = "";
+    public string NodeId { get; set; } = ""; // the assistant node to escalate
+    public RoutingPolicy? Policy { get; set; } // default: auto:quality (top tier)
 }
 
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]
