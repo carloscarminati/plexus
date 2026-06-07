@@ -2,6 +2,8 @@
 
 A desktop app where an AI conversation is a **graph of richly-rendered blocks** on a canvas — branch from any node, resume from any node, and each assistant turn renders in its *best representation* (table, link card, chart, code, interactive widget) instead of a wall of markdown.
 
+> See [VISION.md](./VISION.md) for the product north star.
+
 ![Plexus — escalate a turn to a stronger model as a side-by-side sibling branch](docs/escalate.gif)
 
 ## What's interesting
