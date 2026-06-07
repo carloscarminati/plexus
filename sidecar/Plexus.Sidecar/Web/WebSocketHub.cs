@@ -18,24 +18,31 @@ public sealed class WebSocketHub
     private readonly WebSocket _socket;
     private readonly SemaphoreSlim _sendLock = new(1, 1);
     private readonly GraphStore _store;
-    private readonly ConversationService? _conversation;
+    private readonly ConversationService _conversation;
     private readonly ModelRegistry _registry;
+    private readonly SettingsStore _settings;
+    private readonly KeychainService _keychain;
+    private readonly Mcp.McpHost _mcp;
     private readonly ILogger _log;
     // Pending MCP tool confirmations, keyed by tool_use id (M0 §3.2). The turn
     // runs in the background and awaits these; the receive loop resolves them.
     private readonly ConcurrentDictionary<string, TaskCompletionSource<bool>> _pendingConfirms = new();
 
     // If the user never answers a tool confirmation, the turn is cancelled rather
-    // than hanging forever. Overridable for tests via PLEXUS_CONFIRM_TIMEOUT_SECONDS.
-    private static readonly TimeSpan ConfirmTimeout = TimeSpan.FromSeconds(
-        int.TryParse(Environment.GetEnvironmentVariable("PLEXUS_CONFIRM_TIMEOUT_SECONDS"), out var s) && s > 0 ? s : 120);
+    // than hanging forever. Read live from settings (default 120s).
+    private TimeSpan ConfirmTimeout => TimeSpan.FromSeconds(_settings.Current.ConfirmTimeoutSeconds);
 
-    public WebSocketHub(WebSocket socket, GraphStore store, ConversationService? conversation, ModelRegistry registry, ILogger log)
+    public WebSocketHub(
+        WebSocket socket, GraphStore store, ConversationService conversation, ModelRegistry registry,
+        SettingsStore settings, KeychainService keychain, Mcp.McpHost mcp, ILogger log)
     {
         _socket = socket;
         _store = store;
         _conversation = conversation;
         _registry = registry;
+        _settings = settings;
+        _keychain = keychain;
+        _mcp = mcp;
         _log = log;
     }
 
@@ -83,6 +90,10 @@ public sealed class WebSocketHub
 
             case NewGraphEvent ng:
                 var created = _store.CreateGraph(ng.Title);
+                // Apply the global default routing policy (Settings → Routing) to new graphs.
+                var defaultPolicy = _settings.Current.DefaultPolicy;
+                _store.SetGraphPolicy(created.Id, defaultPolicy);
+                created.DefaultPolicy = defaultPolicy;
                 await SendAsync(new GraphServerEvent { Graph = created }); // make it active
                 await SendAsync(new GraphsServerEvent { Graphs = _store.ListGraphs() }); // refresh the list
                 break;
@@ -96,14 +107,7 @@ public sealed class WebSocketHub
                 break;
 
             case SendMessageEvent sm:
-                if (_conversation is null)
-                {
-                    await SendAsync(new ErrorServerEvent
-                    {
-                        Message = "No Anthropic API key configured. Set ANTHROPIC_API_KEY or add it to the keychain.",
-                    });
-                    break;
-                }
+                if (!HasAnthropicKey()) { await SendAsync(NoKeyError()); break; }
                 // Run the turn in the background so the receive loop stays free to
                 // process the user's tool-confirmation reply mid-turn.
                 StartTurn(c => _conversation.RunTurnAsync(
@@ -116,11 +120,7 @@ public sealed class WebSocketHub
                 break;
 
             case EscalateEvent esc:
-                if (_conversation is null)
-                {
-                    await SendAsync(new ErrorServerEvent { Message = "No Anthropic API key configured." });
-                    break;
-                }
+                if (!HasAnthropicKey()) { await SendAsync(NoKeyError()); break; }
                 // Re-run the input that produced `esc.NodeId` as a sibling branch
                 // with a stronger model (R1 §4.2). Background, like send_message.
                 StartTurn(c => _conversation.EscalateTurnAsync(
@@ -150,7 +150,134 @@ public sealed class WebSocketHub
             case ListModelsEvent:
                 await SendAsync(new ModelsServerEvent { Models = CuratedModels() });
                 break;
+
+            case GetSettingsEvent:
+                await SendAsync(BuildSettingsEvent());
+                break;
+
+            case SetGeneralSettingsEvent gs:
+            {
+                var s = _settings.Current;
+                _settings.Save(new AppSettings
+                {
+                    ConfirmTimeoutSeconds = gs.ConfirmTimeoutSeconds > 0 ? gs.ConfirmTimeoutSeconds : s.ConfirmTimeoutSeconds,
+                    DefaultPolicy = s.DefaultPolicy,
+                });
+                await SendAsync(BuildSettingsEvent());
+                break;
+            }
+
+            case SetDefaultPolicyEvent dp:
+            {
+                var s = _settings.Current;
+                _settings.Save(new AppSettings { ConfirmTimeoutSeconds = s.ConfirmTimeoutSeconds, DefaultPolicy = dp.Policy });
+                await SendAsync(BuildSettingsEvent());
+                break;
+            }
+
+            case SetAnthropicKeyEvent sk:
+            {
+                var ok = !string.IsNullOrWhiteSpace(sk.Key) && _keychain.SetKey("anthropic", sk.Key.Trim());
+                if (!ok)
+                    await SendAsync(new ErrorServerEvent { Message = "Could not store the key in the keychain (macOS only)." });
+                await SendAsync(BuildSettingsEvent());
+                break;
+            }
+
+            case DeleteAnthropicKeyEvent:
+                _keychain.DeleteKey("anthropic");
+                await SendAsync(BuildSettingsEvent());
+                break;
+
+            case SetMcpServerEvent ms:
+                await HandleSetMcpServerAsync(ms);
+                break;
+
+            case DeleteMcpServerEvent dm:
+                await HandleDeleteMcpServerAsync(dm.Id);
+                break;
         }
+    }
+
+    private bool HasAnthropicKey() => _keychain.GetAnthropicKey() is not null;
+    private static ErrorServerEvent NoKeyError() =>
+        new() { Message = "No Anthropic API key configured. Add it in Settings → Providers." };
+
+    // Consolidated, secret-free view of all config the Settings panel surfaces.
+    private SettingsServerEvent BuildSettingsEvent()
+    {
+        var s = _settings.Current;
+        var servers = _mcp.LoadRegistry().Select(cfg => new McpServerView
+        {
+            Id = cfg.Id,
+            Name = cfg.Name,
+            Enabled = cfg.Enabled,
+            ToolPolicy = cfg.ToolPolicy,
+            Transport = new McpTransportView
+            {
+                Kind = cfg.Transport.Kind,
+                Command = cfg.Transport.Command,
+                Args = cfg.Transport.Args,
+                Env = cfg.Transport.Env,
+                Url = cfg.Transport.Url,
+            },
+            HttpCredentialSet = cfg.Transport.Kind == "http" && _keychain.HasKey($"mcp-{cfg.Id}"),
+        }).ToList();
+
+        return new SettingsServerEvent
+        {
+            ConfirmTimeoutSeconds = s.ConfirmTimeoutSeconds,
+            DefaultPolicy = s.DefaultPolicy,
+            AnthropicKeyConfigured = _keychain.HasKey("anthropic"),
+            McpServers = servers,
+        };
+    }
+
+    private async Task HandleSetMcpServerAsync(SetMcpServerEvent ms)
+    {
+        var v = ms.Server;
+        if (string.IsNullOrWhiteSpace(v.Id))
+        {
+            await SendAsync(new ErrorServerEvent { Message = "MCP server needs an id." });
+            return;
+        }
+
+        var registry = _mcp.LoadRegistry();
+        var cfg = registry.FirstOrDefault(x => x.Id == v.Id);
+        if (cfg is null)
+        {
+            cfg = new Mcp.McpServerConfig { Id = v.Id };
+            registry.Add(cfg);
+        }
+        cfg.Name = v.Name;
+        cfg.Enabled = v.Enabled;
+        cfg.ToolPolicy = string.IsNullOrWhiteSpace(v.ToolPolicy) ? null : v.ToolPolicy;
+        cfg.Transport = new Mcp.McpTransport
+        {
+            Kind = v.Transport.Kind,
+            Command = v.Transport.Command,
+            Args = v.Transport.Args,
+            Env = v.Transport.Env,
+            Url = v.Transport.Url,
+        };
+        _mcp.SaveRegistry(registry); // secrets are NOT in here
+
+        // HTTP credential (optional) goes to the keychain by server id, never the file.
+        if (!string.IsNullOrWhiteSpace(ms.HttpCredential))
+            _keychain.SetKey($"mcp-{v.Id}", ms.HttpCredential!.Trim());
+
+        await _mcp.ReloadAsync(); // apply add/enable/disable live
+        await SendAsync(BuildSettingsEvent());
+    }
+
+    private async Task HandleDeleteMcpServerAsync(string id)
+    {
+        var registry = _mcp.LoadRegistry();
+        registry.RemoveAll(x => x.Id == id);
+        _mcp.SaveRegistry(registry);
+        _keychain.DeleteKey($"mcp-{id}"); // drop any stored HTTP credential
+        await _mcp.ReloadAsync();
+        await SendAsync(BuildSettingsEvent());
     }
 
     // An interactive block (currently `choices`) fired. The sidecar — not the
@@ -158,9 +285,9 @@ public sealed class WebSocketHub
     // message and continue from the node that showed it (spec §4.4).
     private void HandleIntent(IntentEvent intent, CancellationToken ct)
     {
-        if (_conversation is null)
+        if (!HasAnthropicKey())
         {
-            _ = SendAsync(new ErrorServerEvent { Message = "No Anthropic API key configured." });
+            _ = SendAsync(NoKeyError());
             return;
         }
         if (intent.Kind != "choice")

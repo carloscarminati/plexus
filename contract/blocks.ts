@@ -169,7 +169,39 @@ export type ClientEvent =
   | { type: "escalate"; graphId: string; nodeId: string; policy?: RoutingPolicy }
   // Graph management — rename / delete a graph (persistence already exists).
   | { type: "set_graph_title"; graphId: string; title?: string }
-  | { type: "delete_graph"; graphId: string };
+  | { type: "delete_graph"; graphId: string }
+  // Settings — read + edit consolidated config. Secrets go to the keychain, never
+  // into config files or over the wire back to the client.
+  | { type: "get_settings" }
+  | { type: "set_general_settings"; confirmTimeoutSeconds: number }
+  | { type: "set_default_policy"; policy: RoutingPolicy }
+  | { type: "set_anthropic_key"; key: string }
+  | { type: "delete_anthropic_key" }
+  | { type: "set_mcp_server"; server: McpServerView; httpCredential?: string }
+  | { type: "delete_mcp_server"; id: string };
+
+// Settings views (secret-free). Mirror of the C# McpServerView / SettingsServerEvent.
+export interface McpTransportView {
+  kind: "stdio" | "http";
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  url?: string;
+}
+export interface McpServerView {
+  id: string;
+  name: string;
+  transport: McpTransportView;
+  enabled: boolean;
+  toolPolicy?: string;
+  httpCredentialSet?: boolean;
+}
+export interface AppSettingsView {
+  confirmTimeoutSeconds: number;
+  defaultPolicy: RoutingPolicy;
+  anthropicKeyConfigured: boolean;
+  mcpServers: McpServerView[];
+}
 
 export type ServerEvent =
   | { type: "graphs"; graphs: { id: string; title?: string; updatedAt?: string }[] }
@@ -192,4 +224,6 @@ export type ServerEvent =
       args: unknown;
       readOnly: boolean;
     }
+  // Settings — consolidated, secret-free config snapshot.
+  | ({ type: "settings" } & AppSettingsView)
   | { type: "error"; message: string };

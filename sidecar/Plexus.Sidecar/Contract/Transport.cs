@@ -20,6 +20,13 @@ namespace Plexus.Sidecar.Contract;
 [JsonDerivedType(typeof(EscalateEvent), "escalate")]
 [JsonDerivedType(typeof(SetGraphTitleEvent), "set_graph_title")]
 [JsonDerivedType(typeof(DeleteGraphEvent), "delete_graph")]
+[JsonDerivedType(typeof(GetSettingsEvent), "get_settings")]
+[JsonDerivedType(typeof(SetGeneralSettingsEvent), "set_general_settings")]
+[JsonDerivedType(typeof(SetDefaultPolicyEvent), "set_default_policy")]
+[JsonDerivedType(typeof(SetAnthropicKeyEvent), "set_anthropic_key")]
+[JsonDerivedType(typeof(DeleteAnthropicKeyEvent), "delete_anthropic_key")]
+[JsonDerivedType(typeof(SetMcpServerEvent), "set_mcp_server")]
+[JsonDerivedType(typeof(DeleteMcpServerEvent), "delete_mcp_server")]
 public abstract class ClientEvent { }
 
 public sealed class LoadGraphEvent : ClientEvent
@@ -88,6 +95,60 @@ public sealed class DeleteGraphEvent : ClientEvent
     public string GraphId { get; set; } = "";
 }
 
+// ── Settings (consolidates config the UI surfaces) ───────────────────────────
+public sealed class GetSettingsEvent : ClientEvent { }
+
+public sealed class SetGeneralSettingsEvent : ClientEvent
+{
+    public int ConfirmTimeoutSeconds { get; set; } = 120;
+}
+
+public sealed class SetDefaultPolicyEvent : ClientEvent
+{
+    public RoutingPolicy Policy { get; set; } = RoutingPolicy.Manual("claude-opus-4-8");
+}
+
+// Providers (Anthropic-only execution): the key goes to the keychain, never a file.
+public sealed class SetAnthropicKeyEvent : ClientEvent
+{
+    public string Key { get; set; } = "";
+}
+
+public sealed class DeleteAnthropicKeyEvent : ClientEvent { }
+
+// MCP registry edits. The HTTP credential (if any) is keychain-bound by id; the
+// rest of the config is written to mcp-servers.json. Never put the secret in the file.
+public sealed class SetMcpServerEvent : ClientEvent
+{
+    public McpServerView Server { get; set; } = new();
+    public string? HttpCredential { get; set; }
+}
+
+public sealed class DeleteMcpServerEvent : ClientEvent
+{
+    public string Id { get; set; } = "";
+}
+
+// Secret-free view of an MCP server (mirror of McpServerConfig + a credential flag).
+public sealed class McpServerView
+{
+    public string Id { get; set; } = "";
+    public string Name { get; set; } = "";
+    public McpTransportView Transport { get; set; } = new();
+    public bool Enabled { get; set; } = true;
+    public string? ToolPolicy { get; set; }
+    public bool HttpCredentialSet { get; set; } // true if a keychain credential exists
+}
+
+public sealed class McpTransportView
+{
+    public string Kind { get; set; } = "stdio"; // "stdio" | "http"
+    public string? Command { get; set; }
+    public List<string>? Args { get; set; }
+    public Dictionary<string, string>? Env { get; set; }
+    public string? Url { get; set; }
+}
+
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]
 [JsonDerivedType(typeof(GraphsServerEvent), "graphs")]
 [JsonDerivedType(typeof(GraphServerEvent), "graph")]
@@ -97,8 +158,18 @@ public sealed class DeleteGraphEvent : ClientEvent
 [JsonDerivedType(typeof(TurnCompletedServerEvent), "turn_completed")]
 [JsonDerivedType(typeof(ModelsServerEvent), "models")]
 [JsonDerivedType(typeof(ToolConfirmationRequestServerEvent), "tool_confirmation_request")]
+[JsonDerivedType(typeof(SettingsServerEvent), "settings")]
 [JsonDerivedType(typeof(ErrorServerEvent), "error")]
 public abstract class ServerEvent { }
+
+// Consolidated, secret-free config snapshot for the Settings panel.
+public sealed class SettingsServerEvent : ServerEvent
+{
+    public int ConfirmTimeoutSeconds { get; set; }
+    public RoutingPolicy DefaultPolicy { get; set; } = RoutingPolicy.Manual("claude-opus-4-8");
+    public bool AnthropicKeyConfigured { get; set; }
+    public List<McpServerView> McpServers { get; set; } = new();
+}
 
 // M0 — the host asks the user to approve a non-read-only MCP tool call.
 public sealed class ToolConfirmationRequestServerEvent : ServerEvent

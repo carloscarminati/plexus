@@ -117,6 +117,32 @@ export interface ModelInfo {
   vision: boolean;
 }
 
+// ── Settings (consolidated config the panel surfaces) ───────────────────────
+
+export interface McpTransportView {
+  kind: "stdio" | "http";
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  url?: string;
+}
+
+export interface McpServerView {
+  id: string;
+  name: string;
+  transport: McpTransportView;
+  enabled: boolean;
+  toolPolicy?: string;
+  httpCredentialSet?: boolean; // true if an HTTP credential is stored in the keychain
+}
+
+export interface AppSettingsView {
+  confirmTimeoutSeconds: number;
+  defaultPolicy: RoutingPolicy;
+  anthropicKeyConfigured: boolean;
+  mcpServers: McpServerView[];
+}
+
 export type ClientEvent =
   | { type: "load_graph"; graphId: string }
   | { type: "list_graphs" }
@@ -131,7 +157,15 @@ export type ClientEvent =
   | { type: "escalate"; graphId: string; nodeId: string; policy?: RoutingPolicy }
   // Graph management — rename / delete a graph.
   | { type: "set_graph_title"; graphId: string; title?: string }
-  | { type: "delete_graph"; graphId: string };
+  | { type: "delete_graph"; graphId: string }
+  // Settings — read + edit consolidated config (secrets go to the keychain).
+  | { type: "get_settings" }
+  | { type: "set_general_settings"; confirmTimeoutSeconds: number }
+  | { type: "set_default_policy"; policy: RoutingPolicy }
+  | { type: "set_anthropic_key"; key: string }
+  | { type: "delete_anthropic_key" }
+  | { type: "set_mcp_server"; server: McpServerView; httpCredential?: string }
+  | { type: "delete_mcp_server"; id: string };
 
 export type ServerEvent =
   | { type: "graphs"; graphs: { id: string; title?: string; updatedAt?: string }[] }
@@ -151,4 +185,5 @@ export type ServerEvent =
       args: unknown;
       readOnly: boolean;
     }
+  | ({ type: "settings" } & AppSettingsView)
   | { type: "error"; message: string };

@@ -28,26 +28,25 @@ builder.Services.AddSingleton<ITelemetrySink>(sp =>
     new SqliteTelemetrySink(sp.GetRequiredService<ILogger<SqliteTelemetrySink>>()));
 builder.Services.AddHostedService<RegistryRefreshService>();
 
+// App settings (confirm timeout, default routing policy) — local config file.
+builder.Services.AddSingleton<SettingsStore>();
+
 // MCP host (M0): connects only to user-configured registry servers.
 builder.Services.AddSingleton<KeychainService>();
 builder.Services.AddSingleton<McpHost>();
 
-// Resolve the API key once at startup; it never leaves the sidecar. Conversation
-// services are only registered when a key is present — without one the app still
-// serves graph load/list/create, it just can't run turns.
-var apiKey = new KeychainService().GetAnthropicKey();
-if (!string.IsNullOrWhiteSpace(apiKey))
-{
-    builder.Services.AddSingleton(new AnthropicTurnService(apiKey));
-    builder.Services.AddSingleton<ConversationService>();
-}
+// Conversation services are always registered: the API key is resolved lazily per
+// turn (KeychainService), so a key set from Settings → Providers takes effect on
+// the next turn without restarting. Without a key, turns surface a clear error.
+builder.Services.AddSingleton<AnthropicTurnService>();
+builder.Services.AddSingleton<ConversationService>();
 
 var app = builder.Build();
 app.UseWebSockets();
 
 var logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Plexus");
-if (string.IsNullOrWhiteSpace(apiKey))
-    logger.LogWarning("No Anthropic API key found (keychain or ANTHROPIC_API_KEY). Conversations are disabled until one is set.");
+if (string.IsNullOrWhiteSpace(app.Services.GetRequiredService<KeychainService>().GetAnthropicKey()))
+    logger.LogWarning("No Anthropic API key found (keychain or ANTHROPIC_API_KEY). Set one in Settings → Providers.");
 
 app.MapGet("/health", () => Results.Ok(new { status = "ok", schemaVersion = Plexus.Sidecar.Contract.BlockSchema.Version }));
 
@@ -63,8 +62,11 @@ app.Map("/ws", async (HttpContext context) =>
     var hub = new WebSocketHub(
         socket,
         context.RequestServices.GetRequiredService<GraphStore>(),
-        context.RequestServices.GetService<ConversationService>(), // null when no API key
+        context.RequestServices.GetRequiredService<ConversationService>(),
         context.RequestServices.GetRequiredService<ModelRegistry>(),
+        context.RequestServices.GetRequiredService<SettingsStore>(),
+        context.RequestServices.GetRequiredService<KeychainService>(),
+        context.RequestServices.GetRequiredService<McpHost>(),
         logger);
     await hub.RunAsync(context.RequestAborted);
 });

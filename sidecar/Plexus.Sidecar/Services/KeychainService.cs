@@ -25,6 +25,61 @@ public sealed class KeychainService
     // Convenience for the R0 single-provider path.
     public string? GetAnthropicKey() => GetKey("anthropic");
 
+    // True if a secret is stored in the keychain for this id (does NOT read it out).
+    // Env-var fallbacks are not "stored" — Settings manages keychain entries only.
+    public bool HasKey(string providerId)
+    {
+        if (!OperatingSystem.IsMacOS())
+            return false;
+        var (exit, _) = RunSecurity("find-generic-password", "-a", Account, "-s", $"plexus-{providerId}-key");
+        return exit == 0;
+    }
+
+    // Write/update a secret. The panel edits config; secrets only ever land here,
+    // never in any config file. Returns false off macOS (no keychain).
+    public bool SetKey(string providerId, string secret)
+    {
+        if (!OperatingSystem.IsMacOS() || string.IsNullOrWhiteSpace(secret))
+            return false;
+        // -U updates the item in place if it already exists instead of erroring.
+        var (exit, _) = RunSecurity("add-generic-password", "-a", Account, "-s", $"plexus-{providerId}-key", "-w", secret, "-U");
+        return exit == 0;
+    }
+
+    public bool DeleteKey(string providerId)
+    {
+        if (!OperatingSystem.IsMacOS())
+            return false;
+        var (exit, _) = RunSecurity("delete-generic-password", "-a", Account, "-s", $"plexus-{providerId}-key");
+        return exit == 0; // non-zero also means "wasn't there", which is fine for the caller
+    }
+
+    private static (int ExitCode, string Output) RunSecurity(params string[] args)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "/usr/bin/security",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+            };
+            foreach (var a in args)
+                psi.ArgumentList.Add(a);
+            using var proc = Process.Start(psi);
+            if (proc is null)
+                return (-1, "");
+            var output = proc.StandardOutput.ReadToEnd();
+            proc.WaitForExit(3000);
+            return (proc.ExitCode, output);
+        }
+        catch
+        {
+            return (-1, "");
+        }
+    }
+
     private static string? ReadMacKeychain(string service)
     {
         if (!OperatingSystem.IsMacOS())

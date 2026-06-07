@@ -25,11 +25,27 @@ public sealed record TurnResult(List<Block> Blocks, string Raw, int? TokensIn, i
 public sealed class AnthropicTurnService
 {
     private const int MaxToolRounds = 8; // safety cap on tool-use rounds per turn
-    private readonly AnthropicClient _client;
+    private readonly Services.KeychainService _keychain;
+    private AnthropicClient? _client;
+    private string? _clientKey;
 
-    public AnthropicTurnService(string apiKey)
+    // The key is resolved lazily (not captured at construction) so a key set from
+    // Settings takes effect on the next turn without restarting the sidecar.
+    public AnthropicTurnService(Services.KeychainService keychain)
     {
-        _client = new AnthropicClient { ApiKey = apiKey };
+        _keychain = keychain;
+    }
+
+    private AnthropicClient Client()
+    {
+        var key = _keychain.GetAnthropicKey()
+            ?? throw new InvalidOperationException("No Anthropic API key configured. Add it in Settings → Providers.");
+        if (_client is null || _clientKey != key)
+        {
+            _client = new AnthropicClient { ApiKey = key };
+            _clientKey = key;
+        }
+        return _client;
     }
 
     // Executes one tool call (the host call + the human gate live in the executor,
@@ -75,7 +91,7 @@ public sealed class AnthropicTurnService
         while (true)
         {
             var parameters = BuildMessageParams(modelId, messages, advanced, toolUnions);
-            response = await _client.Messages.Create(parameters, cancellationToken: ct);
+            response = await Client().Messages.Create(parameters, cancellationToken: ct);
             if (response.Usage is { } u)
             {
                 tokensIn += (int)u.InputTokens;

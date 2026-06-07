@@ -920,3 +920,242 @@ body {
   color: #0b1020;
   border-color: var(--accent);
 }
+
+/* ── Settings modal ─────────────────────────────────────── */
+.settings-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+.settings-modal {
+  width: 680px;
+  max-width: 92vw;
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+}
+.settings-title {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.settings-close {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 14px;
+}
+.settings-close:hover {
+  color: var(--text);
+}
+.settings-body {
+  overflow-y: auto;
+  padding: 6px 18px 18px;
+}
+.settings-loading {
+  color: var(--muted);
+  padding: 24px 0;
+}
+.settings-section {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--border);
+}
+.settings-section:last-child {
+  border-bottom: none;
+}
+.settings-section h3 {
+  margin: 0 0 10px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.settings-label {
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.settings-input {
+  flex: 1;
+  min-width: 160px;
+  font-size: 13px;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg);
+  color: var(--text);
+}
+.settings-input.narrow {
+  flex: 0 0 90px;
+  min-width: 90px;
+}
+.settings-input.grow {
+  flex: 2;
+}
+.settings-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.settings-hint {
+  font-size: 11px;
+  color: var(--muted);
+  margin: 6px 0 0;
+  line-height: 1.5;
+}
+.key-status {
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 999px;
+}
+.key-status.ok {
+  color: #6ee7a8;
+  background: rgba(110, 231, 168, 0.12);
+}
+.key-status.missing {
+  color: #f0c674;
+  background: rgba(240, 198, 116, 0.12);
+}
+
+/* buttons */
+.btn-primary,
+.btn-secondary,
+.btn-danger,
+.btn-mini {
+  font-size: 12px;
+  border-radius: 7px;
+  cursor: pointer;
+  padding: 7px 12px;
+  border: 1px solid var(--border);
+}
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #0b1020;
+  font-weight: 600;
+}
+.btn-primary:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.btn-secondary {
+  background: var(--panel-2);
+  color: var(--text);
+}
+.btn-secondary:hover {
+  border-color: var(--accent);
+}
+.btn-danger {
+  background: rgba(240, 138, 138, 0.12);
+  border-color: rgba(240, 138, 138, 0.4);
+  color: #f08a8a;
+}
+.btn-danger.sm {
+  padding: 4px 8px;
+}
+.btn-mini {
+  padding: 4px 8px;
+  background: none;
+  color: var(--muted);
+}
+.btn-mini:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.btn-mini.danger:hover {
+  color: #f08a8a;
+  border-color: rgba(240, 138, 138, 0.5);
+}
+
+/* MCP rows + form */
+.mcp-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.mcp-toggle {
+  display: flex;
+  align-items: center;
+}
+.mcp-main {
+  flex: 1;
+  min-width: 0;
+}
+.mcp-name {
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mcp-sub {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mcp-policy {
+  font-size: 11px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 6px;
+}
+.mcp-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.mcp-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  margin: 8px 0;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+.mcp-form-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.mcp-form-row select {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 7px 9px;
+  font-size: 13px;
+}
+.mcp-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ClientEvent, Graph, ModelInfo, RoutingPolicy, ServerEvent } from "./contract";
+import type { AppSettingsView, ClientEvent, Graph, McpServerView, ModelInfo, RoutingPolicy, ServerEvent } from "./contract";
 
 const SIDECAR_URL = "ws://127.0.0.1:8765/ws";
 
@@ -27,6 +27,8 @@ export function useSidecar() {
   const [confirm, setConfirm] = useState<Extract<ServerEvent, { type: "tool_confirmation_request" }> | null>(null);
   // Graph history (sidebar), most-recently-active first.
   const [graphs, setGraphs] = useState<GraphSummary[]>([]);
+  // Consolidated app config for the Settings panel (null until first snapshot).
+  const [settings, setSettings] = useState<AppSettingsView | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
   // Latest active graph id, readable inside the socket handler without stale closures.
   const activeIdRef = useRef<string | null>(null);
@@ -87,6 +89,14 @@ export function useSidecar() {
           }
           break;
         }
+        case "settings":
+          setSettings({
+            confirmTimeoutSeconds: msg.confirmTimeoutSeconds,
+            defaultPolicy: msg.defaultPolicy,
+            anthropicKeyConfigured: msg.anthropicKeyConfigured,
+            mcpServers: msg.mcpServers,
+          });
+          break;
         case "tool_confirmation_request":
           setConfirm(msg);
           break;
@@ -107,6 +117,7 @@ export function useSidecar() {
         sock.send(JSON.stringify({ type: "list_models" } satisfies ClientEvent));
         // The graph list drives startup: open the last active one, or create one.
         sock.send(JSON.stringify({ type: "list_graphs" } satisfies ClientEvent));
+        sock.send(JSON.stringify({ type: "get_settings" } satisfies ClientEvent));
       };
       sock.onmessage = (ev) => {
         try {
@@ -166,6 +177,23 @@ export function useSidecar() {
     },
     [send],
   );
+
+  // ── Settings (all persist server-side; the panel re-renders from the snapshot) ──
+  const setGeneralSettings = useCallback(
+    (confirmTimeoutSeconds: number) => send({ type: "set_general_settings", confirmTimeoutSeconds }),
+    [send],
+  );
+  const setDefaultPolicy = useCallback(
+    (policy: RoutingPolicy) => send({ type: "set_default_policy", policy }),
+    [send],
+  );
+  const setAnthropicKey = useCallback((key: string) => send({ type: "set_anthropic_key", key }), [send]);
+  const deleteAnthropicKey = useCallback(() => send({ type: "delete_anthropic_key" }), [send]);
+  const setMcpServer = useCallback(
+    (server: McpServerView, httpCredential?: string) => send({ type: "set_mcp_server", server, httpCredential }),
+    [send],
+  );
+  const deleteMcpServer = useCallback((id: string) => send({ type: "delete_mcp_server", id }), [send]);
 
   // Click a node: plain click selects only it; shift/cmd-click toggles it in the
   // set (for a DAG merge of ≥2 nodes).
@@ -272,5 +300,12 @@ export function useSidecar() {
     sendMessage,
     sendChoice,
     escalate,
+    settings,
+    setGeneralSettings,
+    setDefaultPolicy,
+    setAnthropicKey,
+    deleteAnthropicKey,
+    setMcpServer,
+    deleteMcpServer,
   };
 }

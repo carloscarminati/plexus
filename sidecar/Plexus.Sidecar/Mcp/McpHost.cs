@@ -59,6 +59,31 @@ public sealed class McpHost : IAsyncDisposable
         return new();
     }
 
+    // The registry file is the source of truth (Settings edits it). Secrets are
+    // NEVER written here — HTTP credentials live in the keychain by server id.
+    public void SaveRegistry(List<McpServerConfig> servers)
+    {
+        File.WriteAllText(_registryPath, Json.Serialize(servers));
+    }
+
+    // Re-read the registry and reconnect from scratch so Settings edits (add /
+    // remove / enable / disable) apply without a restart. Best-effort, like startup.
+    public async Task ReloadAsync(CancellationToken ct = default)
+    {
+        List<McpClient> old;
+        lock (_gate)
+        {
+            old = _clients.Values.ToList();
+            _clients.Clear();
+            _tools.Clear();
+        }
+        foreach (var c in old)
+        {
+            try { await c.DisposeAsync(); } catch { /* ignore */ }
+        }
+        await ConnectAllAsync(ct);
+    }
+
     // Connect every enabled server. A server that fails to connect is logged and
     // skipped — it must not break startup or a turn.
     public async Task ConnectAllAsync(CancellationToken ct = default)
