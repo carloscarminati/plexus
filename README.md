@@ -13,6 +13,10 @@ A desktop app where an AI conversation is a **graph of richly-rendered blocks** 
 - **Cost-aware model routing.** Configure providers and choose a model **manually or automatically by request complexity**, optimizing for cost, quality, or a balance. A capability filter never picks a model that can't do the task; routing stays sticky per branch to preserve the prompt cache; every turn records model, cost, latency, and *why* it was picked — shown as a badge on each node.
 - **Local-first & BYO key.** The graph persists to SQLite on disk; the API key lives in the OS keychain and never reaches the renderer.
 
+## The canvas
+
+![Plexus canvas — a branching conversation of richly-rendered blocks](docs/screenshot.png)
+
 ## Architecture
 
 ```
