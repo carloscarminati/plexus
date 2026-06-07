@@ -74,41 +74,7 @@ public sealed class AnthropicTurnService
 
         while (true)
         {
-            var system = new List<TextBlockParam>
-            {
-                new() { Text = SystemPrompt.Text, CacheControl = new CacheControlEphemeral() },
-            };
-            var thinking = advanced ? new ThinkingConfigAdaptive() : (ThinkingConfigParam?)null;
-            var outputConfig = advanced ? new OutputConfig { Effort = Effort.High } : null;
-
-            // The tool fields are init-only AND the SDK tracks property presence, so
-            // assigning `ToolChoice = null` serializes `tool_choice: null` and the API
-            // 400s. The only way to OMIT it (tool-free turns) is to not set it at all —
-            // hence two construction branches.
-            var parameters = toolUnions is not null
-                ? new MessageCreateParams
-                {
-                    Model = modelId,
-                    MaxTokens = 16000,
-                    System = system,
-                    Thinking = thinking,
-                    OutputConfig = outputConfig,
-                    Messages = messages,
-                    Tools = toolUnions,
-                    // One tool call per round: makes the round cap a real bound and lets
-                    // the safety gate confirm each side-effecting call individually.
-                    ToolChoice = new ToolChoiceAuto { DisableParallelToolUse = true },
-                }
-                : new MessageCreateParams
-                {
-                    Model = modelId,
-                    MaxTokens = 16000,
-                    System = system,
-                    Thinking = thinking,
-                    OutputConfig = outputConfig,
-                    Messages = messages,
-                };
-
+            var parameters = BuildMessageParams(modelId, messages, advanced, toolUnions);
             response = await _client.Messages.Create(parameters, cancellationToken: ct);
             if (response.Usage is { } u)
             {
@@ -164,6 +130,53 @@ public sealed class AnthropicTurnService
         var fullRaw = transcript.Length > 0 ? $"[tool calls]\n{transcript}[answer]\n{raw}" : raw;
 
         return new TurnResult(blocks, fullRaw, tokensIn, tokensOut);
+    }
+
+    // Builds the per-round request. Tool fields are set ONLY when tools exist.
+    //
+    // Subtle regression guard (see AnthropicTurnServiceTests): `ToolChoice` is a
+    // union with an `implicit operator ToolChoice(ToolChoiceAuto)`. Writing the
+    // tempting one-liner `ToolChoice = tools is not null ? new ToolChoiceAuto{…} : null`
+    // makes the ternary's null flow THROUGH that implicit operator, producing a
+    // *present* ToolChoice wrapping null → the body serializes `"tool_choice":null`
+    // and the API 400s ("tool_choice: Input should be an object"). So for a tool-free
+    // turn we must not set the property at all — hence the two construction branches.
+    internal static MessageCreateParams BuildMessageParams(
+        string modelId,
+        List<MessageParam> messages,
+        bool advanced,
+        List<ToolUnion>? toolUnions)
+    {
+        var system = new List<TextBlockParam>
+        {
+            new() { Text = SystemPrompt.Text, CacheControl = new CacheControlEphemeral() },
+        };
+        var thinking = advanced ? new ThinkingConfigAdaptive() : (ThinkingConfigParam?)null;
+        var outputConfig = advanced ? new OutputConfig { Effort = Effort.High } : null;
+
+        return toolUnions is not null
+            ? new MessageCreateParams
+            {
+                Model = modelId,
+                MaxTokens = 16000,
+                System = system,
+                Thinking = thinking,
+                OutputConfig = outputConfig,
+                Messages = messages,
+                Tools = toolUnions,
+                // One tool call per round: makes the round cap a real bound and lets
+                // the safety gate confirm each side-effecting call individually.
+                ToolChoice = new ToolChoiceAuto { DisableParallelToolUse = true },
+            }
+            : new MessageCreateParams
+            {
+                Model = modelId,
+                MaxTokens = 16000,
+                System = system,
+                Thinking = thinking,
+                OutputConfig = outputConfig,
+                Messages = messages,
+            };
     }
 
     private static string Truncate(string s, int max) =>
