@@ -44,9 +44,6 @@ The frontend renders, never thinks. The .NET sidecar owns all state. The single 
 Requires the [.NET SDK](https://dotnet.microsoft.com/) (10+), [Node](https://nodejs.org) (20+), and [Rust](https://www.rust-lang.org/tools/install).
 
 ```bash
-# Store your Anthropic API key in the macOS keychain (preferred) or an env var:
-security add-generic-password -a plexus -s plexus-anthropic-key -w "sk-ant-..."
-
 # Sidecar (the brain):
 dotnet run --project sidecar/Plexus.Sidecar          # ws://127.0.0.1:8765
 
@@ -54,9 +51,11 @@ dotnet run --project sidecar/Plexus.Sidecar          # ws://127.0.0.1:8765
 cd app && npm install && npm run tauri dev
 ```
 
+On first launch, open **Settings (the gear icon) → Providers** and paste your Anthropic API key. It's stored in the OS keychain — never in a file, never shown back. The key takes effect on the next turn, no restart needed. (Prefer the shell? Set `ANTHROPIC_API_KEY` before launching the sidecar instead.)
+
 See [docs/sidecar.md](docs/sidecar.md) for the WebSocket protocol and a spec→implementation status map.
 
-## Status — v0.4.0
+## Status
 
 | Phase | Scope | State |
 | ----- | ----- | ----- |
@@ -64,10 +63,10 @@ See [docs/sidecar.md](docs/sidecar.md) for the WebSocket protocol and a spec→i
 | **P1** | Branching canvas, `chart`/`choices`, prompt caching | ✅ done (`v0.2.0`) |
 | **R0** | Model registry (models.dev), routing seam, cost telemetry | ✅ done (`v0.3.0`) |
 | **R1** | Heuristic auto-routing + unified policy control | ✅ done (`v0.4.0`) |
-| **P2** | DAG merge, MCP host + `mcp_ui` block | ⏳ planned |
+| **P2** | DAG merge · MCP host (M0) · conversation history · Settings | 🚧 shipped; `mcp_ui` (M1) + json-render pending |
 | **R2** | Learned router / gateway (gated on R1 telemetry) | ⏳ planned |
 
-Next up: a one-click **"escalate to a stronger model"** action that re-runs a node as a sibling branch — model comparison as a first-class visual act.
+This cycle shipped **DAG merge**, the **MCP host (M0)** with human-gated tools, **Escalate** (re-run a node with a stronger model as a side-by-side sibling — the hero above), **conversation history**, and a **Settings** panel (Anthropic key, MCP servers, routing default — all in-app). Next: `mcp_ui` rendering, then the compose/export surface.
 
 See [docs/spec.md](docs/spec.md) and [docs/spec-model-routing.md](docs/spec-model-routing.md) for the full plans, and [docs/sidecar.md](docs/sidecar.md) for the spec→implementation map.
 

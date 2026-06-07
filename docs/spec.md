@@ -192,7 +192,9 @@ This is the standard ancestor-walk used by existing canvas chats. The merge case
 ### P2 — Reach — 🚧 In progress
 - [x] DAG merge: multi-select nodes, union-of-ancestors context. *(done — `node.mergeParents`, multi-parent ancestor-walk in `BuildHistory`, shift/⌘-click multi-select on the canvas with dashed merge edges)*
 - [x] Conversation history: new / list / switch / rename / delete graphs over the existing SQLite persistence. *(done — `GraphSidebar`; startup opens the last active graph; titles derived from the first user message; ordered most-recently-active first)*
-- [ ] MCP host (official C# SDK) wired; `mcp_ui` block renders MCP Apps UI resources in a sandboxed iframe.
+- [x] MCP host (official C# SDK) wired: connect to configured servers, expose their tools, human-gated execution (M0). *(done — see [spec-mcp-host.md](spec-mcp-host.md))*
+- [x] Settings panel: Anthropic API key → keychain, MCP registry editing, global routing default, tool-confirmation timeout. *(done — consolidates config that was previously set by hand; secrets stay in the keychain)*
+- [ ] `mcp_ui` block renders MCP Apps UI resources in a sandboxed iframe (M1).
 - [ ] Optional: migrate the block catalog onto Vercel json-render.
 - [ ] Optional: expose Plexus's own MCP server.
 

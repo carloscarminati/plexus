@@ -117,6 +117,9 @@ Rendering & bridge:
 
 ### M0 — Host + tools, no UI yet — ✅ Done
 - [x] Server registry: configure stdio + HTTP servers; credentials in keychain.
+      *(now also editable from **Settings → MCP Servers** — add/edit/enable/disable/toolPolicy,
+      HTTP credential → keychain by id; edits reconnect live. The registry file stays the
+      source of truth.)*
 - [x] Connect/discover/expose tools to the model; graceful disconnect (per-server
       try/catch — a dead server never breaks startup or a turn). *Tools are exposed
       via the Anthropic tool-use loop (the turn path uses the Anthropic SDK, not

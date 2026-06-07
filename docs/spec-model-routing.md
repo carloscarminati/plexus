@@ -128,10 +128,12 @@ Cache is per-model/provider. If the router flips models mid-thread, the shared-p
 - **Default to branch-level routing, not per-turn.** A model is chosen when a branch starts and stays sticky for that branch unless `requires` forces a change (e.g. a turn suddenly needs vision).
 - When computing `cost` for the policy, account for cache state: re-using a cached prefix on the current model may beat a nominally cheaper model that starts cold.
 
-### 4.2 Canvas integration (this is the differentiator)
-- Per-node **model badge + cost**, plus `reason` on hover.
-- **"Escalate" action**: re-run a node with a stronger model as a *sibling branch* — one click, both answers visible side by side. Routing + branching turn model comparison into a first-class visual act.
-- Auto-routing can surface a soft suggestion: "Auto picked Haiku here — escalate to Opus?" → creates the sibling branch.
+### 4.2 Canvas integration (this is the differentiator) — ✅ Done
+- [x] Per-node **model badge + cost**, plus `reason` on hover.
+- [x] **"Escalate" action**: re-run a node with a stronger model as a *sibling branch* — one click, both answers visible side by side. Routing + branching turn model comparison into a first-class visual act. *(done — default Auto-quality or a specific model; the re-run uses the original's exact ancestor context)*
+- [x] Auto-routing surfaces a soft suggestion: "Auto picked Haiku here — escalate to a stronger model?" → creates the sibling branch.
+
+> The session **default** routing policy is now editable in **Settings → Routing** (the topbar / per-node `PolicyPicker` overrides it per turn); new graphs adopt the global default.
 
 ## 5. Open questions
 - Tier→model mapping per provider: hard-coded table, or derived from a models.dev capability/cost ranking? *(eng)*

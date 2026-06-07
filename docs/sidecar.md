@@ -18,8 +18,8 @@ dotnet run --project sidecar/Plexus.Sidecar
 
 Defined in [`contract/blocks.ts`](../contract/blocks.ts) (`ClientEvent` / `ServerEvent`) and mirrored in `Contract/Transport.cs`. Both are discriminated unions on `type`. The wire format is camelCase JSON.
 
-Client → server: `list_graphs`, `new_graph`, `load_graph`, `send_message`, `intent` (P1).
-Server → client: `graphs`, `graph`, `node_created`, `turn_started`, `turn_delta` (P1), `turn_completed`, `error`.
+Client → server: `list_graphs`, `new_graph`, `load_graph`, `send_message`, `intent` (P1), `set_session_policy`, `list_models` (R1), `tool_confirmation` (M0), `escalate` (R1 §4.2), `set_graph_title`, `delete_graph` (P2), `get_settings`, `set_general_settings`, `set_default_policy`, `set_anthropic_key`, `delete_anthropic_key`, `set_mcp_server`, `delete_mcp_server` (Settings).
+Server → client: `graphs`, `graph`, `node_created`, `turn_started`, `turn_delta` (P1), `turn_completed`, `models` (R1), `tool_confirmation_request` (M0), `settings` (Settings), `error`.
 
 A turn: `send_message {graphId, fromNodeId, text}` →
 `node_created` (the user node) → `turn_started` (reserved assistant id) → `turn_completed` (assistant node with blocks).
@@ -35,10 +35,10 @@ A turn: `send_message {graphId, fromNodeId, text}` →
 
 | P0 acceptance criterion | Status |
 | --- | --- |
-| Tauri boots; frontend ↔ sidecar over WebSocket | sidecar side done; frontend pending (needs Node/Rust) |
+| Tauri boots; frontend ↔ sidecar over WebSocket | done (Tauri shell + React frontend) |
 | API key in OS keychain; never in renderer | done (`Services/KeychainService.cs`, macOS keychain + env fallback) |
 | Single linear conversation end-to-end | done server-side (verify with a key) |
-| Assistant turns render as blocks `{markdown, table, link_card, code}` | done (contract + parsing; renderers pending in frontend) |
+| Assistant turns render as blocks `{markdown, table, link_card, code}` | done (contract + parsing + frontend renderers) |
 | Strategy (a) for one provider + (b) fallback | done (Anthropic / Claude) |
 | `link_card` resolves an OG image server-side | done (`Services/LinkCardResolver.cs`) |
 | Graph persists to SQLite and reloads | done (`Persistence/GraphStore.cs`) |
