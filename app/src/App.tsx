@@ -13,6 +13,17 @@ import type { RoutingPolicy } from "./contract";
 import { REPO_URL, APP_VERSION } from "./meta";
 import "./App.css";
 
+// Canvas/detail splitter bounds (px). Detail width is user-resizable; neither pane
+// is allowed to collapse below its minimum.
+const DETAIL_MIN = 360;
+const DETAIL_DEFAULT = 440;
+const CANVAS_MIN = 320;
+const DIVIDER_W = 6;
+
+// Clamp a detail width to the viewport so a small window can't wedge the layout.
+const clampDetailToViewport = (w: number) =>
+  Math.max(DETAIL_MIN, Math.min(w, Math.max(DETAIL_MIN, window.innerWidth - CANVAS_MIN - DIVIDER_W)));
+
 function App() {
   const {
     status,
@@ -58,6 +69,18 @@ function App() {
       return false;
     }
   });
+  // Resizable detail pane width — persisted, clamped to the viewport on load.
+  const [detailWidth, setDetailWidth] = useState<number>(() => {
+    try {
+      const v = parseInt(localStorage.getItem("plexus.detailPane.width") ?? "", 10);
+      return Number.isFinite(v) ? clampDetailToViewport(v) : DETAIL_DEFAULT;
+    } catch {
+      return DETAIL_DEFAULT;
+    }
+  });
+  const workspaceRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const dragBounds = useRef<{ right: number; canvasLeft: number } | null>(null);
   // Escalate target: defaults to Auto-quality (top tier); the picker can override.
   const [escalatePolicy, setEscalatePolicy] = useState<RoutingPolicy>({ kind: "auto", objective: "quality" });
   const detailRef = useRef<HTMLDivElement>(null);
@@ -93,6 +116,60 @@ function App() {
       /* ignore (private mode / disabled storage) */
     }
   }, [sidebarCollapsed]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("plexus.detailPane.width", String(Math.round(detailWidth)));
+    } catch {
+      /* ignore */
+    }
+  }, [detailWidth]);
+
+  // Keep the detail width sane against the real geometry: on mount, on window
+  // resize, and when the sidebar toggles (which changes the canvas region). Idempotent.
+  useEffect(() => {
+    const clamp = () => {
+      const ws = workspaceRef.current?.getBoundingClientRect();
+      const cv = canvasRef.current?.getBoundingClientRect();
+      setDetailWidth((w) => {
+        if (ws && cv) {
+          const maxDetail = Math.max(DETAIL_MIN, ws.right - cv.left - DIVIDER_W - CANVAS_MIN);
+          return Math.min(w, maxDetail);
+        }
+        return clampDetailToViewport(w);
+      });
+    };
+    clamp();
+    window.addEventListener("resize", clamp);
+    return () => window.removeEventListener("resize", clamp);
+  }, [sidebarCollapsed]);
+
+  // ── Canvas/detail splitter (hand-rolled, pointer-capture drag) ──────────────
+  const onDividerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    const ws = workspaceRef.current?.getBoundingClientRect();
+    const cv = canvasRef.current?.getBoundingClientRect();
+    if (!ws || !cv) return;
+    // Bounds are fixed for the drag: detail grows leftward from the workspace's
+    // right edge; the canvas keeps at least CANVAS_MIN starting at its current left.
+    dragBounds.current = { right: ws.right, canvasLeft: cv.left };
+    e.currentTarget.setPointerCapture(e.pointerId);
+    document.body.classList.add("col-resizing");
+  };
+  const onDividerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const b = dragBounds.current;
+    if (!b) return;
+    const maxDetail = Math.max(DETAIL_MIN, b.right - b.canvasLeft - DIVIDER_W - CANVAS_MIN);
+    setDetailWidth(Math.max(DETAIL_MIN, Math.min(b.right - e.clientX, maxDetail)));
+  };
+  const onDividerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    dragBounds.current = null;
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {
+      /* already released */
+    }
+    document.body.classList.remove("col-resizing");
+  };
 
   // Cmd/Ctrl+\ toggles the sidebar — but never while typing in a field.
   useEffect(() => {
@@ -176,7 +253,7 @@ function App() {
         </div>
       </header>
 
-      <div className="workspace">
+      <div className="workspace" ref={workspaceRef}>
         {!sidebarCollapsed && (
           <GraphSidebar
             graphs={graphs}
@@ -188,7 +265,7 @@ function App() {
           />
         )}
 
-        <div className="canvas-pane">
+        <div className="canvas-pane" ref={canvasRef}>
           {graph && nodes.length > 0 ? (
             <CanvasView graph={graph} selectedIds={selectedIds} pending={pending} onClickNode={clickNode} />
           ) : (
@@ -199,7 +276,19 @@ function App() {
           )}
         </div>
 
-        <aside className="detail-pane">
+        <div
+          className="pane-divider"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize detail pane"
+          title="Drag to resize · double-click to reset"
+          onPointerDown={onDividerDown}
+          onPointerMove={onDividerMove}
+          onPointerUp={onDividerUp}
+          onDoubleClick={() => setDetailWidth(DETAIL_DEFAULT)}
+        />
+
+        <aside className="detail-pane" style={{ flex: `0 0 ${detailWidth}px`, width: detailWidth }}>
           <div className="detail-scroll" ref={detailRef}>
             {selected ? (
               <>

@@ -522,14 +522,42 @@ body {
   flex: 1;
   position: relative;
   background: var(--bg);
-  border-right: 1px solid var(--border);
-  min-width: 0;
+  min-width: 320px; /* never collapse the canvas when dragging the splitter */
+}
+/* draggable splitter between canvas and detail: thin line, wider invisible hit area */
+.pane-divider {
+  flex: 0 0 6px;
+  position: relative;
+  cursor: col-resize;
+  background: transparent;
+  touch-action: none;
+}
+.pane-divider::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: var(--border);
+  transition: background 0.12s;
+}
+.pane-divider:hover::before,
+body.col-resizing .pane-divider::before {
+  background: var(--accent);
+  width: 2px;
+}
+body.col-resizing {
+  user-select: none;
+  cursor: col-resize;
 }
 .detail-pane {
-  width: 440px;
+  /* width is inline (resizable); flex-basis set there too */
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 360px;
 }
 .detail-scroll {
   flex: 1;
