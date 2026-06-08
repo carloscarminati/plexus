@@ -1,13 +1,12 @@
 using System.Diagnostics;
 using System.Text.Json;
-using ModelContextProtocol.Client;
+using Microsoft.Extensions.AI;
 using Plexus.Sidecar.Contract;
 using Plexus.Sidecar.Mcp;
 using Plexus.Sidecar.Model;
 using Plexus.Sidecar.Persistence;
 using Plexus.Sidecar.Routing;
 using Plexus.Sidecar.Services;
-using AnthropicTool = Anthropic.Models.Messages.Tool;
 
 namespace Plexus.Sidecar.Model;
 
@@ -27,7 +26,8 @@ public sealed class ConversationService
     private const string DefaultModel = "claude-opus-4-8";
 
     private readonly GraphStore _store;
-    private readonly AnthropicTurnService _turns;
+    private readonly ChatTurnService _chatTurns;
+    private readonly ChatClientFactory _clientFactory;
     private readonly LinkCardResolver _linkCards;
     private readonly IModelRouter _router;
     private readonly ModelRegistry _registry;
@@ -36,7 +36,8 @@ public sealed class ConversationService
 
     public ConversationService(
         GraphStore store,
-        AnthropicTurnService turns,
+        ChatTurnService chatTurns,
+        ChatClientFactory clientFactory,
         LinkCardResolver linkCards,
         IModelRouter router,
         ModelRegistry registry,
@@ -44,7 +45,8 @@ public sealed class ConversationService
         Mcp.McpHost mcp)
     {
         _store = store;
-        _turns = turns;
+        _chatTurns = chatTurns;
+        _clientFactory = clientFactory;
         _linkCards = linkCards;
         _router = router;
         _registry = registry;
@@ -204,21 +206,21 @@ public sealed class ConversationService
         var assistantId = Guid.NewGuid().ToString("n");
         await emit(new TurnStartedServerEvent { NodeId = assistantId, ParentId = parentId });
 
-        // 3b. MCP tools (M0): expose discovered tools to the model under a unique
-        //     "{server}_{tool}" name. If any tool is available the turn requires a
+        // 3b. MCP tools (M0): expose discovered tools to the model as AIFunctions —
+        //     McpClientTool already derives from AIFunction, so they pass straight into
+        //     the provider-generic loop. If any tool is available the turn requires a
         //     tool-capable model (drives R1's capability filter).
-        var toolMap = new Dictionary<string, McpToolRef>();
-        var anthropicTools = new List<AnthropicTool>();
+        var toolMap = new Dictionary<string, McpToolRef>(StringComparer.Ordinal);
+        var aiTools = new List<AITool>();
         foreach (var t in _mcp.Tools)
         {
-            var exposed = ExposedToolName(t, toolMap.Keys);
-            toolMap[exposed] = t;
-            anthropicTools.Add(ToAnthropicTool(exposed, t.Tool));
+            toolMap[t.Tool.Name] = t; // dispatch the model's call back to its server
+            aiTools.Add(t.Tool);
         }
 
         // 4. Resolve the effective policy and pick a model.
         var requires = new RequestRequirements(
-            ToolCall: anthropicTools.Count > 0,
+            ToolCall: aiTools.Count > 0,
             StructuredOutput: true, // always — block emission strategy (a), docs/spec.md §4.2
             MinContext: EstimateTokens(history));
 
@@ -250,11 +252,12 @@ public sealed class ConversationService
         //    confirm-all server) needs explicit user confirmation before execution.
         var toolCalls = new List<ToolCallRecord>();
 
-        async Task<string> ExecuteTool(string toolUseId, string toolName, JsonElement args, CancellationToken c)
+        async Task<string> ExecuteTool(string callId, string toolName, IReadOnlyDictionary<string, object?> args, CancellationToken c)
         {
             if (!toolMap.TryGetValue(toolName, out var t))
                 return $"[error] unknown tool '{toolName}'.";
 
+            var argsElement = JsonSerializer.SerializeToElement(args); // for the gate display + the record
             var readOnly = t.ReadOnly;
             // Conservative floor: confirm anything not explicitly read-only.
             // `confirm-all` tightens to confirm everything; no policy loosens below this.
@@ -263,26 +266,27 @@ public sealed class ConversationService
             var approved = true;
             if (needConfirm)
                 approved = confirmTool is not null &&
-                    await confirmTool(new ToolConfirmRequest(assistantId, toolUseId, t.ServerId, t.ServerName, t.Tool.Name, args, readOnly));
+                    await confirmTool(new ToolConfirmRequest(assistantId, callId, t.ServerId, t.ServerName, t.Tool.Name, argsElement, readOnly));
 
             if (!approved)
             {
-                toolCalls.Add(new ToolCallRecord { ServerId = t.ServerId, Tool = t.Tool.Name, Args = args, ResultSummary = "(denied by the user)", ReadOnly = readOnly, Approved = false });
+                toolCalls.Add(new ToolCallRecord { ServerId = t.ServerId, Tool = t.Tool.Name, Args = argsElement, ResultSummary = "(denied by the user)", ReadOnly = readOnly, Approved = false });
                 return "The user denied this tool call. Do not retry it; continue without it.";
             }
 
             var resultText = await _mcp.CallAsync(t.ServerId, t.Tool.Name, ToArgsDict(args), c);
-            toolCalls.Add(new ToolCallRecord { ServerId = t.ServerId, Tool = t.Tool.Name, Args = args, ResultSummary = TruncateText(resultText, 400), ReadOnly = readOnly, Approved = true });
+            toolCalls.Add(new ToolCallRecord { ServerId = t.ServerId, Tool = t.Tool.Name, Args = argsElement, ResultSummary = TruncateText(resultText, 400), ReadOnly = readOnly, Approved = true });
             return resultText;
         }
 
-        IReadOnlyList<AnthropicTool>? toolList = anthropicTools.Count > 0 ? anthropicTools : null;
-        AnthropicTurnService.ToolExecutor? executor = null;
-        if (anthropicTools.Count > 0)
-            executor = ExecuteTool;
+        IReadOnlyList<AITool>? toolList = aiTools.Count > 0 ? aiTools : null;
+        ChatTurnService.ToolExecutor? executor = aiTools.Count > 0 ? ExecuteTool : null;
 
+        // The factory builds the IChatClient for the routed provider (Anthropic today,
+        // OpenAI-compatible once configured); the generic loop runs the same on each.
+        var client = _clientFactory.For(choice.ProviderId, choice.ModelId);
         var sw = Stopwatch.StartNew();
-        var result = await _turns.CompleteAsync(new TurnRequest(history), choice.ModelId, toolList, executor, ct);
+        var result = await _chatTurns.CompleteAsync(client, choice.ModelId, new TurnRequest(history), toolList, executor, ct);
         sw.Stop();
 
         // 6. Resolve OG images for any link cards (server-side, spec P0).
@@ -324,48 +328,13 @@ public sealed class ConversationService
         await emit(new TurnCompletedServerEvent { Node = assistantNode });
     }
 
-    private static readonly char[] _exposedTrim = { '_' };
-
-    // Unique, model-safe tool name: "{server}_{tool}" sanitized to [A-Za-z0-9_], ≤64 chars.
-    private static string ExposedToolName(McpToolRef t, IEnumerable<string> taken)
+    // The model's function-call arguments (object?-valued) → JsonElement, the shape
+    // McpHost.CallAsync forwards to the server.
+    private static Dictionary<string, JsonElement> ToArgsDict(IReadOnlyDictionary<string, object?> args)
     {
-        string Sani(string s) => new string(s.Select(ch => char.IsLetterOrDigit(ch) ? ch : '_').ToArray());
-        var baseName = (Sani(t.ServerId) + "_" + Sani(t.Tool.Name)).Trim(_exposedTrim);
-        if (baseName.Length > 64) baseName = baseName[..64];
-        var set = new HashSet<string>(taken);
-        var name = baseName;
-        for (var i = 1; set.Contains(name); i++)
-            name = $"{baseName[..Math.Min(baseName.Length, 60)]}_{i}";
-        return name;
-    }
-
-    private static AnthropicTool ToAnthropicTool(string name, McpClientTool t)
-    {
-        var props = new Dictionary<string, JsonElement>();
-        List<string>? required = null;
-        var schema = t.JsonSchema;
-        if (schema.ValueKind == JsonValueKind.Object)
-        {
-            if (schema.TryGetProperty("properties", out var p) && p.ValueKind == JsonValueKind.Object)
-                foreach (var prop in p.EnumerateObject())
-                    props[prop.Name] = prop.Value;
-            if (schema.TryGetProperty("required", out var r) && r.ValueKind == JsonValueKind.Array)
-                required = r.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.String).Select(x => x.GetString()!).ToList();
-        }
-        return new AnthropicTool
-        {
-            Name = name,
-            Description = string.IsNullOrEmpty(t.Description) ? t.Name : t.Description,
-            InputSchema = new() { Properties = props, Required = required },
-        };
-    }
-
-    private static Dictionary<string, JsonElement> ToArgsDict(JsonElement args)
-    {
-        var d = new Dictionary<string, JsonElement>();
-        if (args.ValueKind == JsonValueKind.Object)
-            foreach (var p in args.EnumerateObject())
-                d[p.Name] = p.Value;
+        var d = new Dictionary<string, JsonElement>(args.Count);
+        foreach (var (k, v) in args)
+            d[k] = JsonSerializer.SerializeToElement(v);
         return d;
     }
 

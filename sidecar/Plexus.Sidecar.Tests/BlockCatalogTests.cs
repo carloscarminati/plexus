@@ -154,16 +154,16 @@ public class BlockCatalogTests
     [Fact]
     public void ParseBlocks_uses_strategy_a_for_valid_and_falls_back_for_junk()
     {
-        var good = AnthropicTurnService.ParseBlocks("""{"blocks":[{"type":"code","language":"py","code":"print(1)"}]}""");
+        var good = BlockEmission.ParseBlocks("""{"blocks":[{"type":"code","language":"py","code":"print(1)"}]}""");
         Assert.Single(good);
         Assert.IsType<CodeBlock>(good[0]);
 
-        var junk = AnthropicTurnService.ParseBlocks("just some prose, not JSON at all");
+        var junk = BlockEmission.ParseBlocks("just some prose, not JSON at all");
         Assert.Single(junk);
         Assert.IsType<MarkdownBlock>(junk[0]); // fallback parser
 
         // A malformed strategy-(a) envelope (missing required field) → fallback, not a throw.
-        var malformed = AnthropicTurnService.ParseBlocks("""{"blocks":[{"type":"code","language":"py"}]}""");
+        var malformed = BlockEmission.ParseBlocks("""{"blocks":[{"type":"code","language":"py"}]}""");
         Assert.NotEmpty(malformed);
         Assert.IsType<MarkdownBlock>(malformed[0]);
     }

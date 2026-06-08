@@ -35,10 +35,12 @@ builder.Services.AddSingleton<SettingsStore>();
 builder.Services.AddSingleton<KeychainService>();
 builder.Services.AddSingleton<McpHost>();
 
-// Conversation services are always registered: the API key is resolved lazily per
-// turn (KeychainService), so a key set from Settings → Providers takes effect on
-// the next turn without restarting. Without a key, turns surface a clear error.
-builder.Services.AddSingleton<AnthropicTurnService>();
+// Conversation services are always registered. Execution is provider-generic: a
+// ChatClientFactory builds the right IChatClient per routed provider (keys resolved
+// lazily from the keychain), and ChatTurnService runs the same turn/tool-use loop on
+// each. Without a key, turns surface a clear error.
+builder.Services.AddSingleton<ChatClientFactory>();
+builder.Services.AddSingleton<ChatTurnService>();
 builder.Services.AddSingleton<ConversationService>();
 
 var app = builder.Build();
