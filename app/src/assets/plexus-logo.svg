@@ -1,0 +1,28 @@
+<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Plexus">
+  <style>
+    :root{
+      --plexus-bg:#0f1117;
+      --plexus-edge:#C8C8D2;
+      --plexus-node:#C8C8D2;
+      --plexus-accent:#c792ea;
+    }
+    .bg{fill:var(--plexus-bg);}
+    .edge{stroke:var(--plexus-edge);stroke-width:9;stroke-linecap:round;}
+    .node{fill:var(--plexus-node);}
+    .accent{fill:var(--plexus-accent);}
+  </style>
+  <rect class="bg" x="0" y="0" width="512" height="512" rx="112"/>
+  <g class="edge">
+    <line x1="140" y1="256" x2="248" y2="172"/>
+    <line x1="140" y1="256" x2="248" y2="256"/>
+    <line x1="140" y1="256" x2="248" y2="340"/>
+    <line x1="248" y1="172" x2="356" y2="256"/>
+    <line x1="248" y1="256" x2="356" y2="256"/>
+    <line x1="248" y1="340" x2="356" y2="256"/>
+  </g>
+  <circle class="node" cx="140" cy="256" r="24"/>
+  <circle class="node" cx="248" cy="172" r="24"/>
+  <circle class="node" cx="248" cy="256" r="24"/>
+  <circle class="node" cx="248" cy="340" r="24"/>
+  <circle class="accent" cx="356" cy="256" r="36"/>
+</svg>
