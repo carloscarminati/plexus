@@ -47,6 +47,11 @@ export function useSidecar() {
     const handle = (msg: ServerEvent) => {
       switch (msg.type) {
         case "graph":
+          // Authoritatively mark the active graph NOW (not via the post-render
+          // effect) so a `graphs` refresh arriving right after — e.g. when the
+          // server pruned the empty conversation we just left — doesn't see a stale
+          // active id and bounce us to a different conversation.
+          activeIdRef.current = msg.graph.id;
           setGraph(msg.graph);
           setPending(null);
           {

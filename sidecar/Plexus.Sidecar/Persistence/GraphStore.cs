@@ -139,6 +139,45 @@ public sealed class GraphStore
         return cmd.ExecuteScalar() is not null;
     }
 
+    // A conversation is "empty" iff it has ZERO nodes. Nodes are only persisted when
+    // a real turn runs (a user node + its assistant reply), so zero nodes is the
+    // precise, conservative predicate — a graph with any node is never empty, and we
+    // never prune on a fuzzier guess.
+    public bool IsEmptyGraph(string graphId)
+    {
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT NOT EXISTS(SELECT 1 FROM nodes WHERE graph_id = $id);";
+        cmd.Parameters.AddWithValue("$id", graphId);
+        return Convert.ToInt64(cmd.ExecuteScalar()) == 1;
+    }
+
+    // Delete `graphId` only if it is empty (zero nodes). Returns true if it was
+    // deleted. Safe to call on a non-empty or non-existent id (no-op).
+    public bool DeleteIfEmpty(string graphId)
+    {
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "DELETE FROM graphs WHERE id = $id AND NOT EXISTS(SELECT 1 FROM nodes WHERE graph_id = $id);";
+        cmd.Parameters.AddWithValue("$id", graphId);
+        return cmd.ExecuteNonQuery() > 0;
+    }
+
+    // Delete every empty graph EXCEPT `exceptId` (the active conversation, never
+    // pruned out from under the user). Empties have no nodes, so nothing is orphaned.
+    // Returns the number pruned.
+    public int PruneEmptyGraphs(string? exceptId)
+    {
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = exceptId is null
+            ? "DELETE FROM graphs WHERE NOT EXISTS(SELECT 1 FROM nodes WHERE nodes.graph_id = graphs.id);"
+            : "DELETE FROM graphs WHERE id != $except AND NOT EXISTS(SELECT 1 FROM nodes WHERE nodes.graph_id = graphs.id);";
+        if (exceptId is not null)
+            cmd.Parameters.AddWithValue("$except", exceptId);
+        return cmd.ExecuteNonQuery();
+    }
+
     public Graph CreateGraph(string? title)
     {
         var graph = new Graph

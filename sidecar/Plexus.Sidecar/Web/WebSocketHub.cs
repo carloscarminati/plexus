@@ -28,6 +28,10 @@ public sealed class WebSocketHub
     // runs in the background and awaits these; the receive loop resolves them.
     private readonly ConcurrentDictionary<string, TaskCompletionSource<bool>> _pendingConfirms = new();
 
+    // The conversation the user is currently in (set when we send a graph as active).
+    // Used to prune empty "New conversation" cruft without ever deleting the active one.
+    private string? _activeGraphId;
+
     // If the user never answers a tool confirmation, the turn is cancelled rather
     // than hanging forever. Read live from settings (default 120s).
     private TimeSpan ConfirmTimeout => TimeSpan.FromSeconds(_settings.Current.ConfirmTimeoutSeconds);
@@ -85,15 +89,21 @@ public sealed class WebSocketHub
         switch (evt)
         {
             case ListGraphsEvent:
+                // Conversation-list load: drop empty cruft, but never the active one.
+                _store.PruneEmptyGraphs(_activeGraphId);
                 await SendAsync(new GraphsServerEvent { Graphs = _store.ListGraphs() });
                 break;
 
             case NewGraphEvent ng:
+                // Leaving the current conversation: if it never got a turn, prune it.
+                if (_activeGraphId is not null)
+                    _store.DeleteIfEmpty(_activeGraphId);
                 var created = _store.CreateGraph(ng.Title);
                 // Apply the global default routing policy (Settings → Routing) to new graphs.
                 var defaultPolicy = _settings.Current.DefaultPolicy;
                 _store.SetGraphPolicy(created.Id, defaultPolicy);
                 created.DefaultPolicy = defaultPolicy;
+                _activeGraphId = created.Id;
                 await SendAsync(new GraphServerEvent { Graph = created }); // make it active
                 await SendAsync(new GraphsServerEvent { Graphs = _store.ListGraphs() }); // refresh the list
                 break;
@@ -101,9 +111,17 @@ public sealed class WebSocketHub
             case LoadGraphEvent lg:
                 var graph = _store.LoadGraph(lg.GraphId);
                 if (graph is null)
+                {
                     await SendAsync(new ErrorServerEvent { Message = $"Graph '{lg.GraphId}' not found." });
-                else
-                    await SendAsync(new GraphServerEvent { Graph = graph });
+                    break;
+                }
+                // Switching away from an empty conversation prunes it.
+                var prunedOnSwitch = _activeGraphId is not null && _activeGraphId != lg.GraphId
+                    && _store.DeleteIfEmpty(_activeGraphId);
+                _activeGraphId = graph.Id;
+                await SendAsync(new GraphServerEvent { Graph = graph });
+                if (prunedOnSwitch)
+                    await SendAsync(new GraphsServerEvent { Graphs = _store.ListGraphs() });
                 break;
 
             case SendMessageEvent sm:
@@ -152,6 +170,8 @@ public sealed class WebSocketHub
 
             case DeleteGraphEvent dg:
                 _store.DeleteGraph(dg.GraphId);
+                if (dg.GraphId == _activeGraphId)
+                    _activeGraphId = null; // active deleted — the client picks a new target
                 await SendAsync(new GraphsServerEvent { Graphs = _store.ListGraphs() });
                 break;
 
