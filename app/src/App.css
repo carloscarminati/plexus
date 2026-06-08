@@ -480,6 +480,11 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.graph-pin {
+  font-size: 10px;
+  margin-right: 4px;
+  opacity: 0.85;
+}
 .graph-time {
   font-size: 11px;
   color: var(--muted);

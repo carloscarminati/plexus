@@ -20,6 +20,7 @@ namespace Plexus.Sidecar.Contract;
 [JsonDerivedType(typeof(EscalateEvent), "escalate")]
 [JsonDerivedType(typeof(SynthesizeEvent), "synthesize")]
 [JsonDerivedType(typeof(SetGraphTitleEvent), "set_graph_title")]
+[JsonDerivedType(typeof(SetGraphPinnedEvent), "set_graph_pinned")]
 [JsonDerivedType(typeof(DeleteGraphEvent), "delete_graph")]
 [JsonDerivedType(typeof(GetSettingsEvent), "get_settings")]
 [JsonDerivedType(typeof(SetGeneralSettingsEvent), "set_general_settings")]
@@ -96,6 +97,13 @@ public sealed class SetGraphTitleEvent : ClientEvent
 {
     public string GraphId { get; set; } = "";
     public string? Title { get; set; }
+}
+
+// Graph management — pin/unpin a conversation (sticks to the top of the sidebar).
+public sealed class SetGraphPinnedEvent : ClientEvent
+{
+    public string GraphId { get; set; } = "";
+    public bool Pinned { get; set; }
 }
 
 // Graph management — delete a graph and its nodes (destructive; UI confirms).

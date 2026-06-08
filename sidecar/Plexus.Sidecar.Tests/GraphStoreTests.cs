@@ -94,6 +94,30 @@ public class GraphStoreTests : IDisposable
     }
 
     [Fact]
+    public void Pin_toggle_persists_and_is_included_in_the_list_payload()
+    {
+        var a = _store.CreateGraph(null);
+        var b = _store.CreateGraph(null); // newer → would sort first when unpinned
+
+        Assert.False(_store.ListGraphs().Single(g => g.Id == a.Id).Pinned); // default unpinned
+
+        _store.SetGraphPinned(a.Id, true);
+
+        // Reflected in the list payload; B unaffected.
+        Assert.True(_store.ListGraphs().Single(g => g.Id == a.Id).Pinned);
+        Assert.False(_store.ListGraphs().Single(g => g.Id == b.Id).Pinned);
+
+        // Persists across reload, and pinned sorts to the top.
+        var list = new GraphStore(_dbPath).ListGraphs();
+        Assert.True(list.Single(g => g.Id == a.Id).Pinned);
+        Assert.Equal(a.Id, list[0].Id);
+
+        // Toggle back off.
+        _store.SetGraphPinned(a.Id, false);
+        Assert.False(new GraphStore(_dbPath).ListGraphs().Single(g => g.Id == a.Id).Pinned);
+    }
+
+    [Fact]
     public void Prune_and_DeleteIfEmpty_never_remove_the_active_or_a_non_empty_graph()
     {
         var active = _store.CreateGraph(null); // empty but active

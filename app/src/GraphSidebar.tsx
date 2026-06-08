@@ -29,6 +29,7 @@ export function GraphSidebar({
   onOpen,
   onRename,
   onDelete,
+  onPin,
 }: {
   graphs: GraphSummary[];
   activeId: string | null;
@@ -36,6 +37,7 @@ export function GraphSidebar({
   onOpen: (id: string) => void;
   onRename: (id: string, title: string) => void;
   onDelete: (id: string) => void;
+  onPin: (id: string, pinned: boolean) => void;
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -82,7 +84,10 @@ export function GraphSidebar({
         ) : (
           <>
             <div className="graph-main">
-              <div className="graph-name">{displayTitle(g)}</div>
+              <div className="graph-name">
+                {g.pinned && <span className="graph-pin" title="Pinned" aria-hidden="true">📌</span>}
+                {displayTitle(g)}
+              </div>
               <div className="graph-time">{timeAgo(g.updatedAt)}</div>
             </div>
             <button
@@ -100,6 +105,14 @@ export function GraphSidebar({
               <>
                 <div className="menu-backdrop" onClick={(e) => { e.stopPropagation(); setMenuId(null); }} />
                 <div className="graph-menu" onClick={(e) => e.stopPropagation()}>
+                  <button
+                    onClick={() => {
+                      onPin(g.id, !g.pinned);
+                      setMenuId(null);
+                    }}
+                  >
+                    {g.pinned ? "Unpin" : "Pin"}
+                  </button>
                   <button onClick={() => startEdit(g)}>Rename</button>
                   <button
                     className="graph-menu-danger"
@@ -129,8 +142,11 @@ export function GraphSidebar({
     const n = new Date();
     return new Date(n.getFullYear(), n.getMonth(), n.getDate()).getTime();
   })();
+  // Pinned conversations show ONLY in the Pinned section (above the date groups),
+  // not duplicated in their date bucket. Input is pinned-first then updatedAt desc.
+  const pinned = searching ? [] : graphs.filter((g) => g.pinned);
   const groups: GraphSummary[][] = [[], [], [], [], []];
-  if (!searching) for (const g of graphs) groups[bucketOf(g.updatedAt, startOfToday)].push(g);
+  if (!searching) for (const g of graphs) if (!g.pinned) groups[bucketOf(g.updatedAt, startOfToday)].push(g);
 
   return (
     <aside className="graphs-sidebar">
@@ -165,14 +181,22 @@ export function GraphSidebar({
             filtered.map(renderRow)
           )
         ) : (
-          groups.map((group, i) =>
-            group.length === 0 ? null : (
-              <div key={i} className="graph-group">
-                <div className="graph-group-header">{GROUP_LABELS[i]}</div>
-                {group.map(renderRow)}
+          <>
+            {pinned.length > 0 && (
+              <div className="graph-group">
+                <div className="graph-group-header">Pinned</div>
+                {pinned.map(renderRow)}
               </div>
-            ),
-          )
+            )}
+            {groups.map((group, i) =>
+              group.length === 0 ? null : (
+                <div key={i} className="graph-group">
+                  <div className="graph-group-header">{GROUP_LABELS[i]}</div>
+                  {group.map(renderRow)}
+                </div>
+              ),
+            )}
+          </>
         )}
       </div>
 

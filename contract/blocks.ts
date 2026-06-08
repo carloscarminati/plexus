@@ -187,6 +187,7 @@ export type ClientEvent =
   | { type: "synthesize"; graphId: string; fromNodeIds: string[]; policy?: RoutingPolicy }
   // Graph management — rename / delete a graph (persistence already exists).
   | { type: "set_graph_title"; graphId: string; title?: string }
+  | { type: "set_graph_pinned"; graphId: string; pinned: boolean }
   | { type: "delete_graph"; graphId: string }
   // Settings — read + edit consolidated config. Secrets go to the keychain, never
   // into config files or over the wire back to the client.
@@ -222,7 +223,7 @@ export interface AppSettingsView {
 }
 
 export type ServerEvent =
-  | { type: "graphs"; graphs: { id: string; title?: string; updatedAt?: string }[] }
+  | { type: "graphs"; graphs: { id: string; title?: string; updatedAt?: string; pinned?: boolean }[] }
   | { type: "graph"; graph: Graph }
   | { type: "node_created"; node: Node }
   | { type: "turn_started"; nodeId: string; parentId: string | null }

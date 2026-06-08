@@ -61,7 +61,7 @@ public sealed class GraphStore
         cmd.ExecuteNonQuery();
 
         // Migrations for older DBs (ALTER throws if the column already exists).
-        foreach (var (table, col) in new[] { ("graphs", "policy_json TEXT"), ("nodes", "merge_parents_json TEXT"), ("nodes", "kind TEXT") })
+        foreach (var (table, col) in new[] { ("graphs", "policy_json TEXT"), ("nodes", "merge_parents_json TEXT"), ("nodes", "kind TEXT"), ("graphs", "pinned INTEGER DEFAULT 0") })
         {
             using var migrate = conn.CreateCommand();
             migrate.CommandText = $"ALTER TABLE {table} ADD COLUMN {col};";
@@ -77,10 +77,10 @@ public sealed class GraphStore
         using var conn = Open();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
-            SELECT g.id, g.title, COALESCE(MAX(n.created_at), g.created_at) AS updated_at
+            SELECT g.id, g.title, COALESCE(MAX(n.created_at), g.created_at) AS updated_at, COALESCE(g.pinned, 0)
             FROM graphs g LEFT JOIN nodes n ON n.graph_id = g.id
-            GROUP BY g.id, g.title, g.created_at
-            ORDER BY updated_at DESC;
+            GROUP BY g.id, g.title, g.created_at, g.pinned
+            ORDER BY g.pinned DESC, updated_at DESC;
             """;
         using var reader = cmd.ExecuteReader();
         var result = new List<GraphSummary>();
@@ -91,6 +91,7 @@ public sealed class GraphStore
                 Id = reader.GetString(0),
                 Title = reader.IsDBNull(1) ? null : reader.GetString(1),
                 UpdatedAt = reader.IsDBNull(2) ? null : reader.GetString(2),
+                Pinned = !reader.IsDBNull(3) && reader.GetInt64(3) != 0,
             });
         }
         return result;
@@ -102,6 +103,16 @@ public sealed class GraphStore
         using var cmd = conn.CreateCommand();
         cmd.CommandText = "UPDATE graphs SET title = $title WHERE id = $id;";
         cmd.Parameters.AddWithValue("$title", (object?)title ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$id", graphId);
+        cmd.ExecuteNonQuery();
+    }
+
+    public void SetGraphPinned(string graphId, bool pinned)
+    {
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "UPDATE graphs SET pinned = $p WHERE id = $id;";
+        cmd.Parameters.AddWithValue("$p", pinned ? 1 : 0);
         cmd.Parameters.AddWithValue("$id", graphId);
         cmd.ExecuteNonQuery();
     }

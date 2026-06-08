@@ -34,6 +34,7 @@ function App() {
     openGraph,
     renameGraph,
     deleteGraph,
+    pinGraph,
     pending,
     error,
     selectedIds,
@@ -277,6 +278,7 @@ function App() {
             onOpen={openGraph}
             onRename={renameGraph}
             onDelete={deleteGraph}
+            onPin={pinGraph}
           />
         )}
 

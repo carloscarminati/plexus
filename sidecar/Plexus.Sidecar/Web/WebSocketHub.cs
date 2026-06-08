@@ -168,6 +168,11 @@ public sealed class WebSocketHub
                 await SendAsync(new GraphsServerEvent { Graphs = _store.ListGraphs() });
                 break;
 
+            case SetGraphPinnedEvent gp:
+                _store.SetGraphPinned(gp.GraphId, gp.Pinned);
+                await SendAsync(new GraphsServerEvent { Graphs = _store.ListGraphs() });
+                break;
+
             case DeleteGraphEvent dg:
                 _store.DeleteGraph(dg.GraphId);
                 if (dg.GraphId == _activeGraphId)

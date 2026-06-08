@@ -61,4 +61,5 @@ public sealed class GraphSummary
     public string Id { get; set; } = "";
     public string? Title { get; set; }
     public string? UpdatedAt { get; set; } // ISO-8601: latest node, else graph created_at
+    public bool Pinned { get; set; } // sticks to the top of the sidebar
 }

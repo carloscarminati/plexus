@@ -183,6 +183,14 @@ export function useSidecar() {
     [send],
   );
 
+  const pinGraph = useCallback(
+    (id: string, pinned: boolean) => {
+      send({ type: "set_graph_pinned", graphId: id, pinned });
+      setGraphs((gs) => gs.map((g) => (g.id === id ? { ...g, pinned } : g))); // optimistic
+    },
+    [send],
+  );
+
   // ── Settings (all persist server-side; the panel re-renders from the snapshot) ──
   const setGeneralSettings = useCallback(
     (confirmTimeoutSeconds: number) => send({ type: "set_general_settings", confirmTimeoutSeconds }),
@@ -300,6 +308,7 @@ export function useSidecar() {
     openGraph,
     renameGraph,
     deleteGraph,
+    pinGraph,
     pending,
     error,
     selectedIds,
