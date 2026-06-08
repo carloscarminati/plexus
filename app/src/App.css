@@ -6,6 +6,7 @@
   --text: #e6e8ee;
   --muted: #8b90a0;
   --accent: #6ea8fe;
+  --accent-brief: #c792ea; /* deliverable / synthesis (the "◆ brief" violet) */
   --user: #2b3550;
 }
 
@@ -79,6 +80,16 @@ body {
 .empty {
   margin: auto;
   color: var(--muted);
+}
+.empty-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  text-align: center;
+}
+.empty-brand svg {
+  opacity: 0.9;
 }
 
 .turn {
@@ -517,16 +528,16 @@ body {
 }
 /* X1 deliverable (decision brief) — distinct accent + left marker. */
 .canvas-card.card-deliverable {
-  background: linear-gradient(180deg, rgba(199, 146, 234, 0.14), var(--panel));
-  border-color: #c792ea;
-  box-shadow: inset 3px 0 0 #c792ea;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent-brief) 14%, transparent), var(--panel));
+  border-color: var(--accent-brief);
+  box-shadow: inset 3px 0 0 var(--accent-brief);
 }
 .canvas-card.card-deliverable .card-role {
-  color: #c792ea;
+  color: var(--accent-brief);
   font-weight: 600;
 }
 .detail-brief {
-  color: #c792ea;
+  color: var(--accent-brief);
   font-weight: 600;
 }
 .card-role {

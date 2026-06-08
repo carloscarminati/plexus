@@ -6,6 +6,7 @@ import { PolicyPicker } from "./PolicyPicker";
 import { GraphSidebar } from "./GraphSidebar";
 import { SettingsModal } from "./SettingsModal";
 import { ComposeDrawer } from "./ComposeDrawer";
+import { PlexusLogo } from "./components/PlexusLogo";
 import { useSidecar } from "./useSidecar";
 import { formatCost, shortModel } from "./format";
 import type { RoutingPolicy } from "./contract";
@@ -144,7 +145,10 @@ function App() {
           {graph && nodes.length > 0 ? (
             <CanvasView graph={graph} selectedIds={selectedIds} pending={pending} onClickNode={clickNode} />
           ) : (
-            <div className="empty">Send a message to start the graph.</div>
+            <div className="empty empty-brand">
+              <PlexusLogo size={56} variant="mark" />
+              <div>Send a message to start the graph.</div>
+            </div>
           )}
         </div>
 
