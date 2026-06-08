@@ -61,7 +61,7 @@ public sealed class GraphStore
         cmd.ExecuteNonQuery();
 
         // Migrations for older DBs (ALTER throws if the column already exists).
-        foreach (var (table, col) in new[] { ("graphs", "policy_json TEXT"), ("nodes", "merge_parents_json TEXT") })
+        foreach (var (table, col) in new[] { ("graphs", "policy_json TEXT"), ("nodes", "merge_parents_json TEXT"), ("nodes", "kind TEXT") })
         {
             using var migrate = conn.CreateCommand();
             migrate.CommandText = $"ALTER TABLE {table} ADD COLUMN {col};";
@@ -193,7 +193,7 @@ public sealed class GraphStore
         using (var ncmd = conn.CreateCommand())
         {
             ncmd.CommandText = """
-                SELECT id, parent_id, role, created_at, blocks_json, raw, meta_json, merge_parents_json
+                SELECT id, parent_id, role, created_at, blocks_json, raw, meta_json, merge_parents_json, kind
                 FROM nodes WHERE graph_id = $gid ORDER BY created_at ASC;
                 """;
             ncmd.Parameters.AddWithValue("$gid", graphId);
@@ -212,6 +212,7 @@ public sealed class GraphStore
                     Raw = reader.GetString(5),
                     Meta = reader.IsDBNull(6) ? null : PlexusJson.Deserialize<NodeMeta>(reader.GetString(6)),
                     MergeParents = reader.IsDBNull(7) ? null : PlexusJson.Deserialize<List<string>>(reader.GetString(7)),
+                    Kind = reader.IsDBNull(8) ? null : reader.GetString(8),
                 };
                 graph.Nodes.Add(node);
                 if (node.ParentId is not null)
@@ -230,13 +231,14 @@ public sealed class GraphStore
         using var conn = Open();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
-            INSERT INTO nodes (id, graph_id, parent_id, role, created_at, blocks_json, raw, meta_json, merge_parents_json)
-            VALUES ($id, $gid, $parent, $role, $createdAt, $blocks, $raw, $meta, $merge);
+            INSERT INTO nodes (id, graph_id, parent_id, role, created_at, blocks_json, raw, meta_json, merge_parents_json, kind)
+            VALUES ($id, $gid, $parent, $role, $createdAt, $blocks, $raw, $meta, $merge, $kind);
             """;
         cmd.Parameters.AddWithValue("$id", node.Id);
         cmd.Parameters.AddWithValue("$gid", graphId);
         cmd.Parameters.AddWithValue("$parent", (object?)node.ParentId ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$role", node.Role);
+        cmd.Parameters.AddWithValue("$kind", (object?)node.Kind ?? DBNull.Value);
         cmd.Parameters.AddWithValue("$createdAt", node.CreatedAt);
         cmd.Parameters.AddWithValue("$blocks", PlexusJson.Serialize(node.Blocks));
         cmd.Parameters.AddWithValue("$raw", node.Raw);

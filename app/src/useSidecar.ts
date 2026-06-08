@@ -268,6 +268,16 @@ export function useSidecar() {
     [graph, pending, send],
   );
 
+  // X1 — converge the selected branches into a decision-brief deliverable node.
+  const synthesize = useCallback(
+    (fromNodeIds: string[], policy?: RoutingPolicy) => {
+      if (!graph || pending || fromNodeIds.length === 0) return;
+      setError(null);
+      send({ type: "synthesize", graphId: graph.id, fromNodeIds, policy });
+    },
+    [graph, pending, send],
+  );
+
   const setNodeOverride = useCallback((nodeId: string, policy: RoutingPolicy | null) => {
     setNodeOverrides((prev) => {
       const next = { ...prev };
@@ -300,6 +310,7 @@ export function useSidecar() {
     sendMessage,
     sendChoice,
     escalate,
+    synthesize,
     settings,
     setGeneralSettings,
     setDefaultPolicy,

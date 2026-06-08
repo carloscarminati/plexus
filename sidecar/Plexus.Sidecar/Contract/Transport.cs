@@ -18,6 +18,7 @@ namespace Plexus.Sidecar.Contract;
 [JsonDerivedType(typeof(ListModelsEvent), "list_models")]
 [JsonDerivedType(typeof(ToolConfirmationEvent), "tool_confirmation")]
 [JsonDerivedType(typeof(EscalateEvent), "escalate")]
+[JsonDerivedType(typeof(SynthesizeEvent), "synthesize")]
 [JsonDerivedType(typeof(SetGraphTitleEvent), "set_graph_title")]
 [JsonDerivedType(typeof(DeleteGraphEvent), "delete_graph")]
 [JsonDerivedType(typeof(GetSettingsEvent), "get_settings")]
@@ -80,6 +81,14 @@ public sealed class EscalateEvent : ClientEvent
     public string GraphId { get; set; } = "";
     public string NodeId { get; set; } = ""; // the assistant node to escalate
     public RoutingPolicy? Policy { get; set; } // default: auto:quality (top tier)
+}
+
+// X1 — synthesize the selected branches into a decision-brief deliverable node.
+public sealed class SynthesizeEvent : ClientEvent
+{
+    public string GraphId { get; set; } = "";
+    public List<string> FromNodeIds { get; set; } = new(); // the selected branches
+    public RoutingPolicy? Policy { get; set; }
 }
 
 // Graph management — rename a graph (inline title edit).

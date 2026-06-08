@@ -81,6 +81,7 @@ export interface Node {
   parentId: string | null;
   mergeParents?: string[]; // P2 DAG merge: extra parents beyond parentId
   role: "user" | "assistant";
+  kind?: "deliverable"; // X1: a synthesized decision brief — null/absent otherwise
   createdAt: string;
   blocks: Block[];
   raw: string;
@@ -171,6 +172,8 @@ export type ClientEvent =
   // R1 §4.2 — re-run the input that produced an assistant node with a (usually
   // stronger) model as a SIBLING branch (same parent), for side-by-side compare.
   | { type: "escalate"; graphId: string; nodeId: string; policy?: RoutingPolicy }
+  // X1 — synthesize the selected branches into a decision-brief deliverable node.
+  | { type: "synthesize"; graphId: string; fromNodeIds: string[]; policy?: RoutingPolicy }
   // Graph management — rename / delete a graph.
   | { type: "set_graph_title"; graphId: string; title?: string }
   | { type: "delete_graph"; graphId: string }

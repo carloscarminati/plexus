@@ -93,6 +93,7 @@ export interface Node {
   parentId: string | null; // primary parent. Tree by default.
   mergeParents?: string[]; // P2 DAG merge: extra parents beyond parentId (union-of-ancestors)
   role: "user" | "assistant";
+  kind?: "deliverable"; // X1: a synthesized decision brief — null/absent otherwise
   createdAt: string; // ISO; used to order reconstructed history
   blocks: Block[]; // for user turns this is usually one markdown block
   raw: string; // the model's original text — re-fed verbatim on resume
@@ -182,6 +183,8 @@ export type ClientEvent =
   // stronger) model as a SIBLING branch (same parent), for side-by-side compare.
   // nodeId = the assistant node to escalate; context is identical to the original.
   | { type: "escalate"; graphId: string; nodeId: string; policy?: RoutingPolicy }
+  // X1 — synthesize the selected branches into a decision-brief deliverable node.
+  | { type: "synthesize"; graphId: string; fromNodeIds: string[]; policy?: RoutingPolicy }
   // Graph management — rename / delete a graph (persistence already exists).
   | { type: "set_graph_title"; graphId: string; title?: string }
   | { type: "delete_graph"; graphId: string }

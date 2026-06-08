@@ -5,6 +5,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { PolicyPicker } from "./PolicyPicker";
 import { GraphSidebar } from "./GraphSidebar";
 import { SettingsModal } from "./SettingsModal";
+import { ComposeDrawer } from "./ComposeDrawer";
 import { useSidecar } from "./useSidecar";
 import { formatCost, shortModel } from "./format";
 import type { RoutingPolicy } from "./contract";
@@ -35,6 +36,7 @@ function App() {
     sendMessage,
     sendChoice,
     escalate,
+    synthesize,
     settings,
     setGeneralSettings,
     setDefaultPolicy,
@@ -45,6 +47,7 @@ function App() {
   } = useSidecar();
   const [draft, setDraft] = useState("");
   const [showSettings, setShowSettings] = useState(false);
+  const [showCompose, setShowCompose] = useState(false);
   // Escalate target: defaults to Auto-quality (top tier); the picker can override.
   const [escalatePolicy, setEscalatePolicy] = useState<RoutingPolicy>({ kind: "auto", objective: "quality" });
   const detailRef = useRef<HTMLDivElement>(null);
@@ -53,6 +56,13 @@ function App() {
   const selected = nodes.find((n) => n.id === selectedId) ?? null;
   const merging = selectedIds.length >= 2; // P2 DAG merge
   const branching = !merging && selectedId != null && nodes.some((n) => n.parentId === selectedId);
+
+  // X0 COMPOSE: harvest the selected nodes' blocks, ordered by createdAt (deterministic).
+  const composeNodes = selectedIds
+    .map((id) => nodes.find((n) => n.id === id))
+    .filter((n): n is NonNullable<typeof n> => n != null)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const composeBlocks = composeNodes.flatMap((n) => n.blocks);
 
   // Soft suggestion (§4.2): a node auto-routed to a non-top tier can be escalated
   // to a stronger model in one click.
@@ -87,6 +97,14 @@ function App() {
             onChange={(p) => p && setSessionPolicy(p)}
             models={models}
           />
+          <button
+            className="compose-btn"
+            disabled={selectedIds.length === 0}
+            title={selectedIds.length === 0 ? "Select node(s) on the canvas to compose" : "Compose a deliverable from the selection"}
+            onClick={() => setShowCompose(true)}
+          >
+            ⊞ Compose{selectedIds.length > 0 ? ` (${selectedIds.length})` : ""}
+          </button>
           <div className={`status status-${status}`}>{status}</div>
           <button
             className="repo-link"
@@ -135,7 +153,9 @@ function App() {
             {selected ? (
               <>
                 <div className="detail-head">
-                  <span className="detail-role">{selected.role}</span>
+                  <span className={`detail-role ${selected.kind === "deliverable" ? "detail-brief" : ""}`}>
+                    {selected.kind === "deliverable" ? "◆ decision brief" : selected.role}
+                  </span>
                   {selected.meta?.model && (
                     <span className="detail-meta" title={selected.meta.reason ?? undefined}>
                       {selected.meta.model}
@@ -260,6 +280,19 @@ function App() {
           </form>
         </aside>
       </div>
+
+      {showCompose && (
+        <ComposeDrawer
+          blocks={composeBlocks}
+          nodeCount={composeNodes.length}
+          title={graph?.title}
+          onSynthesize={() => {
+            synthesize(selectedIds, sessionPolicy);
+            setShowCompose(false);
+          }}
+          onClose={() => setShowCompose(false)}
+        />
+      )}
 
       {showSettings && (
         <SettingsModal

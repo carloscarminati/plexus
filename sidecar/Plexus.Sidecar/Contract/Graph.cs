@@ -10,6 +10,7 @@ public sealed class Node
     public string? ParentId { get; set; } // primary parent
     public List<string>? MergeParents { get; set; } // P2 DAG merge: extra parents
     public string Role { get; set; } = "user"; // "user" | "assistant"
+    public string? Kind { get; set; } // X1: "deliverable" (synthesis brief) — null otherwise
     public string CreatedAt { get; set; } = ""; // ISO-8601
     public List<Block> Blocks { get; set; } = new();
     public string Raw { get; set; } = ""; // model's original text — re-fed on resume

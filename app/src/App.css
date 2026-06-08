@@ -515,6 +515,20 @@ body {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px rgba(110, 168, 254, 0.3);
 }
+/* X1 deliverable (decision brief) — distinct accent + left marker. */
+.canvas-card.card-deliverable {
+  background: linear-gradient(180deg, rgba(199, 146, 234, 0.14), var(--panel));
+  border-color: #c792ea;
+  box-shadow: inset 3px 0 0 #c792ea;
+}
+.canvas-card.card-deliverable .card-role {
+  color: #c792ea;
+  font-weight: 600;
+}
+.detail-brief {
+  color: #c792ea;
+  font-weight: 600;
+}
 .card-role {
   font-size: 10px;
   text-transform: uppercase;
@@ -1142,4 +1156,70 @@ body {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+/* ── X0 Compose (harvest selection → deliverable) ───────── */
+.compose-btn {
+  font-size: 12px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--panel-2);
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.compose-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.compose-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.compose-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: flex-end;
+  z-index: 60;
+}
+.compose-drawer {
+  width: 560px;
+  max-width: 92vw;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+}
+.compose-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+}
+.compose-title {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.compose-sub {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+.compose-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.compose-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }

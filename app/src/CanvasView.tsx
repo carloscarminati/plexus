@@ -20,6 +20,7 @@ const NODE_H = 96;
 
 interface CardData extends Record<string, unknown> {
   role: string;
+  kind?: string; // X1: "deliverable"
   preview: string;
   types: string[];
   badge?: string; // model + cost, for assistant nodes
@@ -29,11 +30,14 @@ interface CardData extends Record<string, unknown> {
 }
 
 function NodeCard({ data }: NodeProps<Node<CardData>>) {
+  const deliverable = data.kind === "deliverable";
   return (
-    <div className={`canvas-card card-${data.role} ${data.selected ? "card-selected" : ""}`}>
+    <div
+      className={`canvas-card card-${data.role} ${deliverable ? "card-deliverable" : ""} ${data.selected ? "card-selected" : ""}`}
+    >
       <Handle type="target" position={Position.Top} />
       <div className="card-head">
-        <span className="card-role">{data.role}</span>
+        <span className="card-role">{deliverable ? "◆ brief" : data.role}</span>
         {data.badge && (
           <span className="card-badge" title={data.reason}>
             {data.badge}
@@ -111,6 +115,7 @@ export function CanvasView({
     const cards = graph.nodes.map((n) => ({
       id: n.id,
       role: n.role,
+      kind: n.kind as string | undefined,
       preview: previewOf(n.blocks),
       types: n.blocks.map((b) => b.type),
       parentId: n.parentId,
@@ -123,6 +128,7 @@ export function CanvasView({
       cards.push({
         id: pending.nodeId,
         role: "assistant",
+        kind: undefined,
         preview: "",
         types: [],
         parentId: pending.parentId,
@@ -162,6 +168,7 @@ export function CanvasView({
         position: { x: p.x - NODE_W / 2, y: p.y - NODE_H / 2 },
         data: {
           role: c.role,
+          kind: c.kind,
           preview: c.preview,
           types: c.types,
           badge: c.badge,

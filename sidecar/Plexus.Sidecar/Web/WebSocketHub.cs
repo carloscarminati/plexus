@@ -128,6 +128,14 @@ public sealed class WebSocketHub
                     req => RequestConfirmAsync(req, c), c), ct);
                 break;
 
+            case SynthesizeEvent syn:
+                if (!HasAnthropicKey()) { await SendAsync(NoKeyError()); break; }
+                // X1: converge the selected branches into a deliverable node. Background.
+                StartTurn(c => _conversation.SynthesizeAsync(
+                    syn.GraphId, syn.FromNodeIds, SendAsync, syn.Policy,
+                    req => RequestConfirmAsync(req, c), c), ct);
+                break;
+
             case ToolConfirmationEvent tc:
                 if (_pendingConfirms.TryRemove(tc.ToolUseId, out var tcs))
                     tcs.TrySetResult(tc.Approved);

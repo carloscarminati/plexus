@@ -102,8 +102,9 @@ public sealed class ConversationService
         // The assistant node is a child of the user node; its context is the user
         // node's ancestor path; stickiness looks at the branch we came from.
         await GenerateAssistantAsync(
-            graph, graphId, contextNodeId: userNode.Id, assistantParentId: userNode.Id,
-            stickyFromNodeId: primary, requestedPolicy, emit, confirmTool, ct);
+            graph, graphId, BuildHistory(graph, userNode.Id),
+            parentId: userNode.Id, mergeParents: null, stickyFromNodeId: primary,
+            requestedPolicy, kind: null, emit, confirmTool, ct);
     }
 
     // R1 §4.2 "Escalate": re-run the input that produced an assistant node with a
@@ -135,31 +136,73 @@ public sealed class ConversationService
         var policy = requestedPolicy ?? RoutingPolicy.Auto("quality");
 
         await GenerateAssistantAsync(
-            graph, graphId, contextNodeId: userNode.Id, assistantParentId: userNode.Id,
-            stickyFromNodeId: userNode.ParentId, policy, emit, confirmTool, ct);
+            graph, graphId, BuildHistory(graph, userNode.Id),
+            parentId: userNode.Id, mergeParents: null, stickyFromNodeId: userNode.ParentId,
+            policy, kind: null, emit, confirmTool, ct);
     }
 
-    // Shared model-call + persist path for both a normal turn and an Escalate
-    // sibling. Reconstructs context from `contextNodeId`, picks a model, runs the
-    // (gated) tool loop, records telemetry, and persists the assistant node under
-    // `assistantParentId`. `stickyFromNodeId` drives branch stickiness (§4.1).
+    // X1 "Synthesize decision brief": converge the selected branches into a new,
+    // distinguished deliverable node. Context = the union of the selected nodes'
+    // ancestor paths (the exploration) + a synthesis instruction; output = a
+    // decision-brief block array emitted + validated through the existing catalog.
+    // The node is convergent over the selection (parents = selected, reusing the P2
+    // DAG-merge node shape) and tagged kind="deliverable".
+    public async Task SynthesizeAsync(
+        string graphId,
+        IReadOnlyList<string> fromNodeIds,
+        Func<ServerEvent, Task> emit,
+        RoutingPolicy? requestedPolicy = null,
+        Func<ToolConfirmRequest, Task<bool>>? confirmTool = null,
+        CancellationToken ct = default)
+    {
+        var graph = _store.LoadGraph(graphId)
+            ?? throw new InvalidOperationException($"Graph '{graphId}' not found.");
+
+        var selected = (fromNodeIds ?? Array.Empty<string>())
+            .Where(id => !string.IsNullOrEmpty(id) && graph.Nodes.Any(n => n.Id == id))
+            .Distinct()
+            .ToList();
+        if (selected.Count == 0)
+            throw new InvalidOperationException("Synthesis needs at least one selected node.");
+
+        var primary = selected[0];
+        var mergeParents = selected.Count > 1 ? selected.Skip(1).ToList() : null;
+
+        // Context = the union of the selected branches (the exploration), then the
+        // synthesis instruction as the final user turn (ephemeral — not a stored node,
+        // so the deliverable hangs directly off the selected nodes).
+        var history = new List<(string Role, string Content)>(BuildHistory(graph, selected))
+        {
+            ("user", SynthesisPrompt.Instruction),
+        };
+
+        await GenerateAssistantAsync(
+            graph, graphId, history,
+            parentId: primary, mergeParents: mergeParents, stickyFromNodeId: primary,
+            requestedPolicy, kind: "deliverable", emit, confirmTool, ct);
+    }
+
+    // Shared model-call + persist path for a normal turn, an Escalate sibling, and a
+    // Synthesis deliverable. Takes the reconstructed `history`, picks a model, runs the
+    // (gated) tool loop, records telemetry, and persists the produced node under
+    // `parentId` (+ `mergeParents` for a convergent node), tagged with `kind`.
+    // `stickyFromNodeId` drives branch stickiness (§4.1).
     private async Task GenerateAssistantAsync(
         Graph graph,
         string graphId,
-        string contextNodeId,
-        string assistantParentId,
+        IReadOnlyList<(string Role, string Content)> history,
+        string? parentId,
+        List<string>? mergeParents,
         string? stickyFromNodeId,
         RoutingPolicy? requestedPolicy,
+        string? kind,
         Func<ServerEvent, Task> emit,
         Func<ToolConfirmRequest, Task<bool>>? confirmTool,
         CancellationToken ct)
     {
-        // 2. Reserve the assistant node id and tell the UI a turn is underway.
+        // 2. Reserve the node id and tell the UI a turn is underway.
         var assistantId = Guid.NewGuid().ToString("n");
-        await emit(new TurnStartedServerEvent { NodeId = assistantId, ParentId = assistantParentId });
-
-        // 3. Reconstruct context: ancestors of the context node, oldest first.
-        var history = BuildHistory(graph, contextNodeId);
+        await emit(new TurnStartedServerEvent { NodeId = assistantId, ParentId = parentId });
 
         // 3b. MCP tools (M0): expose discovered tools to the model under a unique
         //     "{server}_{tool}" name. If any tool is available the turn requires a
@@ -252,12 +295,14 @@ public sealed class ConversationService
             choice.ModelId, choice.ProviderId, result.TokensIn, result.TokensOut,
             cost, sw.ElapsedMilliseconds, canonical, choice.Reason));
 
-        // 8. Persist and emit the assistant node under its parent (the user node;
-        //    for an Escalate this is the same parent as the original → a sibling).
+        // 8. Persist and emit the produced node under its parent(s). For Synthesis it
+        //    is convergent over the selected nodes (mergeParents) and tagged deliverable.
         var assistantNode = new Node
         {
             Id = assistantId,
-            ParentId = assistantParentId,
+            ParentId = parentId,
+            MergeParents = mergeParents,
+            Kind = kind,
             Role = "assistant",
             CreatedAt = DateTimeOffset.UtcNow.ToString("o"),
             Blocks = result.Blocks,
@@ -369,13 +414,20 @@ public sealed class ConversationService
     // ancestor chain; for a P2 merge node (multiple parents) it's the deduplicated
     // union of every parent's ancestor path (SPEC.md §4.4). User turns are sent
     // as-is; assistant turns use their stored raw text (not a re-render).
-    public static List<(string Role, string Content)> BuildHistory(Graph graph, string nodeId)
+    public static List<(string Role, string Content)> BuildHistory(Graph graph, string nodeId) =>
+        BuildHistory(graph, new[] { nodeId });
+
+    // Union of the ancestor paths of every node in `nodeIds` (dedup, chronological).
+    // For one id this is the simple ancestor chain; for several (a synthesis over
+    // selected branches) it is the deduplicated union of all their explorations.
+    public static List<(string Role, string Content)> BuildHistory(Graph graph, IReadOnlyList<string> nodeIds)
     {
         var byId = graph.Nodes.ToDictionary(n => n.Id);
         var seen = new HashSet<string>();
         var collected = new List<Node>();
         var stack = new Stack<string>();
-        stack.Push(nodeId);
+        foreach (var id in nodeIds)
+            stack.Push(id);
         while (stack.Count > 0)
         {
             var id = stack.Pop();
