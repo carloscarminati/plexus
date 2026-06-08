@@ -18,8 +18,16 @@ public static class SynthesisPrompt
           1. markdown — an H1 title, then one sentence stating the decision / question.
           2. markdown — the options that were considered (a short list).
           3. table — a side-by-side comparison across the dimensions that matter
-             (e.g. fit, maturity, cost, complexity, risk). Add a chart block too ONLY
-             if it genuinely clarifies the comparison.
+             (e.g. fit, maturity, cost, complexity, risk).
+             Chart: include a chart block ONLY when the explored material contains
+             genuine quantitative data (measurements, counts, durations, sizes,
+             prices, percentages). NEVER invent scores, ratings, or weights to
+             populate a chart. If the comparison is qualitative (fit, maturity,
+             ergonomics, pros/cons), rely on the comparison table and OMIT the chart.
+             Use `stack` only for series that are additive parts of a whole (e.g. a
+             budget split); never stack values that represent competing alternatives.
+             When charting real data that compares categories, use one bar per
+             category — do not stack alternatives.
           4. markdown — what was ruled out, and why.
           5. markdown — "## Recommendation": the chosen option, the rationale, and the
              caveats (when the call would change).
