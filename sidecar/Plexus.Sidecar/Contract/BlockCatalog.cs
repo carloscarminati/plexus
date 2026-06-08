@@ -107,6 +107,24 @@ public static class BlockCatalog
 
     private static readonly JsonSchema _schema = JsonSchema.FromText(SchemaNode.ToJsonString());
 
+    // JsonSchema.Net builds its internal evaluation state lazily on the FIRST
+    // Evaluate call, and that build is not thread-safe: two threads hitting an
+    // un-warmed schema concurrently (e.g. parallel xUnit classes, or two turns
+    // landing at once) can race and produce a wrong result — an unknown block
+    // type silently validating. Force the build once here. Static initialization
+    // is serialized by the CLR, so every later Evaluate is read-only and safe.
+    private static readonly bool _schemaWarmed = WarmUpSchema();
+
+    private static bool WarmUpSchema()
+    {
+        // Must be a NON-EMPTY array so the per-item `anyOf` branch constraints are
+        // built too — an empty array never descends into `items`, leaving the branch
+        // schemas (and the discriminator checks) un-warmed and still racy.
+        var sample = new JsonArray(new JsonObject { ["type"] = "markdown", ["text"] = "warmup" });
+        _schema.Evaluate(sample, new EvaluationOptions { OutputFormat = OutputFormat.List });
+        return true;
+    }
+
     // Discriminator names actually present in the generated schema (for tests).
     public static IReadOnlyList<string> SchemaTypeNames { get; } =
         SchemaNode["items"]!["anyOf"]!.AsArray()
