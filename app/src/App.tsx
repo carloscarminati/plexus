@@ -49,6 +49,15 @@ function App() {
   const [draft, setDraft] = useState("");
   const [showSettings, setShowSettings] = useState(false);
   const [showCompose, setShowCompose] = useState(false);
+  // Conversation sidebar collapse — persisted across reloads (localStorage works in
+  // the Tauri webview).
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("plexus.sidebar.collapsed") === "true";
+    } catch {
+      return false;
+    }
+  });
   // Escalate target: defaults to Auto-quality (top tier); the picker can override.
   const [escalatePolicy, setEscalatePolicy] = useState<RoutingPolicy>({ kind: "auto", objective: "quality" });
   const detailRef = useRef<HTMLDivElement>(null);
@@ -77,6 +86,28 @@ function App() {
     detailRef.current?.scrollTo({ top: detailRef.current.scrollHeight });
   }, [selectedId, selected?.blocks.length]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem("plexus.sidebar.collapsed", String(sidebarCollapsed));
+    } catch {
+      /* ignore (private mode / disabled storage) */
+    }
+  }, [sidebarCollapsed]);
+
+  // Cmd/Ctrl+\ toggles the sidebar — but never while typing in a field.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.key !== "\\") return;
+      const el = document.activeElement as HTMLElement | null;
+      const tag = el?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || el?.isContentEditable) return;
+      e.preventDefault();
+      setSidebarCollapsed((v) => !v);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   const doSend = () => {
     if (!draft.trim() || pending) return;
     sendMessage(draft);
@@ -90,7 +121,21 @@ function App() {
   return (
     <div className="app">
       <header className="topbar">
-        <div className="brand">Plexus</div>
+        <div className="topbar-left">
+          <button
+            className="sidebar-toggle"
+            title={`${sidebarCollapsed ? "Show" : "Hide"} conversations (⌘\\)`}
+            aria-label="Toggle conversation sidebar"
+            aria-pressed={!sidebarCollapsed}
+            onClick={() => setSidebarCollapsed((v) => !v)}
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+              <rect x="3" y="4" width="18" height="16" rx="2" />
+              <line x1="9" y1="4" x2="9" y2="20" />
+            </svg>
+          </button>
+          <div className="brand">Plexus</div>
+        </div>
         <div className="topbar-right">
           <PolicyPicker
             label="Routing"
@@ -132,14 +177,16 @@ function App() {
       </header>
 
       <div className="workspace">
-        <GraphSidebar
-          graphs={graphs}
-          activeId={graph?.id ?? null}
-          onNew={newGraph}
-          onOpen={openGraph}
-          onRename={renameGraph}
-          onDelete={deleteGraph}
-        />
+        {!sidebarCollapsed && (
+          <GraphSidebar
+            graphs={graphs}
+            activeId={graph?.id ?? null}
+            onNew={newGraph}
+            onOpen={openGraph}
+            onRename={renameGraph}
+            onDelete={deleteGraph}
+          />
+        )}
 
         <div className="canvas-pane">
           {graph && nodes.length > 0 ? (

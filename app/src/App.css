@@ -47,6 +47,27 @@ body {
   font-weight: 600;
   letter-spacing: 0.04em;
 }
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.sidebar-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+  transition: color 0.15s, background 0.15s;
+}
+.sidebar-toggle:hover {
+  color: var(--text);
+  background: var(--panel-2);
+}
 
 .status {
   font-size: 12px;
