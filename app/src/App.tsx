@@ -7,6 +7,7 @@ import { GraphSidebar } from "./GraphSidebar";
 import { SettingsModal } from "./SettingsModal";
 import { ComposeDrawer } from "./ComposeDrawer";
 import { PlexusLogo } from "./components/PlexusLogo";
+import { blocksToMarkdown } from "./compose/markdown";
 import { useSidecar } from "./useSidecar";
 import { formatCost, shortModel } from "./format";
 import type { RoutingPolicy } from "./contract";
@@ -81,6 +82,7 @@ function App() {
   const workspaceRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const dragBounds = useRef<{ right: number; canvasLeft: number } | null>(null);
+  const [copiedNode, setCopiedNode] = useState(false);
   // Escalate target: defaults to Auto-quality (top tier); the picker can override.
   const [escalatePolicy, setEscalatePolicy] = useState<RoutingPolicy>({ kind: "auto", objective: "quality" });
   const detailRef = useRef<HTMLDivElement>(null);
@@ -107,6 +109,7 @@ function App() {
 
   useEffect(() => {
     detailRef.current?.scrollTo({ top: detailRef.current.scrollHeight });
+    setCopiedNode(false);
   }, [selectedId, selected?.blocks.length]);
 
   useEffect(() => {
@@ -193,6 +196,18 @@ function App() {
   const submit = (e: FormEvent) => {
     e.preventDefault();
     doSend();
+  };
+
+  // Copy the selected node's blocks as Markdown (reuses the X0 serializer).
+  const copyNodeMarkdown = async () => {
+    if (!selected) return;
+    try {
+      await navigator.clipboard.writeText(blocksToMarkdown(selected.blocks));
+      setCopiedNode(true);
+      setTimeout(() => setCopiedNode(false), 1500);
+    } catch {
+      /* clipboard unavailable / rejected — no-op */
+    }
   };
 
   return (
@@ -315,6 +330,11 @@ function App() {
                     allowInherit
                   />
                   {selected.meta?.reason && <span className="branch-reason">{selected.meta.reason}</span>}
+                </div>
+                <div className="node-actions">
+                  <button className="node-copy" onClick={copyNodeMarkdown} title="Copy this node as Markdown">
+                    {copiedNode ? "Copied ✓" : "⧉ Copy"}
+                  </button>
                 </div>
                 {selected.role === "assistant" && (
                   <div className="escalate-box">

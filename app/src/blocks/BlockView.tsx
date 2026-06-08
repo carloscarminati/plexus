@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { marked } from "marked";
 import type { Block } from "../contract";
 import { ChartView } from "./ChartView";
@@ -93,11 +94,22 @@ function hostOf(url: string) {
 }
 
 function CodeView({ block }: { block: Extract<Block, { type: "code" }> }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      // Raw code text — not the markdown-fenced form.
+      await navigator.clipboard.writeText(block.code);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard unavailable / rejected — no-op */
+    }
+  };
   return (
     <div className="block block-code">
       <div className="code-header">
         <span>{block.filename ?? block.language}</span>
-        <button onClick={() => navigator.clipboard?.writeText(block.code)}>copy</button>
+        <button onClick={copy}>{copied ? "Copied ✓" : "copy"}</button>
       </div>
       <pre>
         <code>{block.code}</code>

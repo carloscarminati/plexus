@@ -803,6 +803,23 @@ body.col-resizing {
   color: var(--muted);
   font-style: italic;
 }
+.node-actions {
+  display: flex;
+  margin-bottom: 14px;
+}
+.node-copy {
+  font-size: 12px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--panel-2);
+  color: var(--text);
+  cursor: pointer;
+}
+.node-copy:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
 
 /* §4.2 Escalate: re-run as a stronger sibling for side-by-side comparison */
 .escalate-box {
