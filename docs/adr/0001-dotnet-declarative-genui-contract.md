@@ -118,8 +118,8 @@ C is not rejected forever: json-render's multi-target renderers remain attractiv
 
 ## Action Items (incremental, product-driven)
 
-1. [ ] **C0 — Catalog extraction.** Refactor existing block types into an explicit .NET catalog (types + metadata) with no behavior change. Generate the model prompt + JSON Schema from the catalog. Validate emitted specs against it in the sidecar.
-2. [ ] **C1 — First catalog component: Vega-Lite chart.** Add the chart component as a catalog entry (curated Vega-Lite subset, themed via design tokens; reuses `xLabels` + `series[0]` semantics for pie/arc). Proves the catalog + React registry path and resolves the pie/treadmill problem.
+1. [x] **C0 — Catalog extraction.** Refactor existing block types into an explicit .NET catalog (types + metadata) with no behavior change. Generate the model prompt + JSON Schema from the catalog. Validate emitted specs against it in the sidecar. _(Landed: `8e1500d`.)_
+2. [x] **C1 — First catalog component: Vega-Lite chart.** Add the chart component as a catalog entry (curated Vega-Lite subset, themed via design tokens; reuses `xLabels` + `series[0]` semantics for pie/arc). Proves the catalog + React registry path and resolves the pie/treadmill problem. _(Landed: `873d49b`; channel-based spec + synthesis-data fix in `c3524de`.)_
 3. [ ] **C2 — Protocol-shaped payload.** Introduce structure/data separation, typed value fields, and the ergonomic-emission ↔ protocol-payload mapper; move streaming to JSONL.
 4. [ ] **C3 — (later) Interop & interactivity.** Map to MCP Apps / A2UI once stabilized; add CRDT/data-binding when mcp_ui requires it; consider extraction.
 
