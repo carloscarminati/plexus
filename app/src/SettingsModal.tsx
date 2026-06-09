@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { AppSettingsView, McpServerView, ModelInfo, RoutingPolicy } from "./contract";
+import type { AppSettingsView, McpServerView, ModelInfo, ProviderView, RoutingPolicy } from "./contract";
 import { PolicyPicker } from "./PolicyPicker";
 
 // Consolidated Settings panel. It edits existing config (settings.json, the MCP
@@ -11,20 +11,22 @@ export function SettingsModal({
   onClose,
   setGeneralSettings,
   setDefaultPolicy,
-  setAnthropicKey,
   deleteAnthropicKey,
   setMcpServer,
   deleteMcpServer,
+  setProvider,
+  deleteProvider,
 }: {
   settings: AppSettingsView | null;
   models: ModelInfo[];
   onClose: () => void;
   setGeneralSettings: (confirmTimeoutSeconds: number) => void;
   setDefaultPolicy: (policy: RoutingPolicy) => void;
-  setAnthropicKey: (key: string) => void;
   deleteAnthropicKey: () => void;
   setMcpServer: (server: McpServerView, httpCredential?: string) => void;
   deleteMcpServer: (id: string) => void;
+  setProvider: (provider: ProviderView, apiKey?: string) => void;
+  deleteProvider: (id: string) => void;
 }) {
   return (
     <div className="settings-overlay" onClick={onClose}>
@@ -41,11 +43,17 @@ export function SettingsModal({
         ) : (
           <div className="settings-body">
             <ProvidersSection
-              configured={settings.anthropicKeyConfigured}
-              onSave={setAnthropicKey}
-              onRemove={deleteAnthropicKey}
+              providers={settings.providers}
+              onSave={setProvider}
+              onDelete={deleteProvider}
+              onRemoveAnthropicKey={deleteAnthropicKey}
             />
-            <RoutingSection value={settings.defaultPolicy} models={models} onChange={setDefaultPolicy} />
+            <RoutingSection
+              value={settings.defaultPolicy}
+              models={models}
+              providers={settings.providers}
+              onChange={setDefaultPolicy}
+            />
             <GeneralSection value={settings.confirmTimeoutSeconds} onSave={setGeneralSettings} />
             <McpSection servers={settings.mcpServers} onSave={setMcpServer} onDelete={deleteMcpServer} />
           </div>
@@ -55,58 +63,223 @@ export function SettingsModal({
   );
 }
 
-// ── Providers (Anthropic-only execution) ────────────────────────────────────
+// ── Providers (multi-provider execution, #1) ────────────────────────────────
+// Anthropic is the built-in default (key only). OpenAI-compatible providers add
+// a base URL + default model id + key (OpenAI, gateways, Ollama, …). Keys go to
+// the keychain by provider id; config (no secrets) to providers.json.
 function ProvidersSection({
-  configured,
+  providers,
   onSave,
-  onRemove,
+  onDelete,
+  onRemoveAnthropicKey,
 }: {
-  configured: boolean;
-  onSave: (key: string) => void;
-  onRemove: () => void;
+  providers: ProviderView[];
+  onSave: (provider: ProviderView, apiKey?: string) => void;
+  onDelete: (id: string) => void;
+  onRemoveAnthropicKey: () => void;
 }) {
-  const [key, setKey] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [confirmId, setConfirmId] = useState<string | null>(null);
+  const [key, setKey] = useState<Record<string, string>>({});
+
+  const setKeyFor = (id: string, v: string) => setKey((k) => ({ ...k, [id]: v }));
+
   return (
     <section className="settings-section">
       <h3>Providers</h3>
-      <div className="settings-row">
-        <div className="settings-label">
-          Anthropic API key
-          <span className={`key-status ${configured ? "ok" : "missing"}`}>
-            {configured ? "✓ configured (keychain)" : "not set"}
-          </span>
-        </div>
-      </div>
-      <div className="settings-row">
-        <input
-          type="password"
-          className="settings-input"
-          placeholder={configured ? "Enter a new key to replace…" : "sk-ant-…"}
-          value={key}
-          onChange={(e) => setKey(e.currentTarget.value)}
-          autoComplete="off"
-        />
-        <button
-          className="btn-primary"
-          disabled={!key.trim()}
-          onClick={() => {
-            onSave(key.trim());
-            setKey("");
+
+      {providers.map((p) =>
+        editingId === p.id ? (
+          <ProviderForm
+            key={p.id}
+            initial={p}
+            onCancel={() => setEditingId(null)}
+            onSubmit={(prov, apiKey) => {
+              onSave(prov, apiKey);
+              setEditingId(null);
+            }}
+          />
+        ) : (
+          <div key={p.id} className="mcp-item">
+            <div className="mcp-main">
+              <div className="mcp-name">
+                {p.label || p.id}
+                <span className={`key-status ${p.keySet ? "ok" : "missing"}`}>
+                  {p.keySet ? "🔑 key set" : "no key"}
+                </span>
+              </div>
+              <div className="mcp-sub">
+                {p.type === "anthropic"
+                  ? `anthropic${p.modelId ? ` · ${p.modelId}` : ""}`
+                  : `openai-compatible · ${p.baseUrl ?? "—"}${p.modelId ? ` · ${p.modelId}` : ""}`}
+              </div>
+            </div>
+
+            {/* Inline key field — the secret never round-trips back from the server. */}
+            <input
+              type="password"
+              className="settings-input narrow"
+              placeholder={p.keySet ? "replace key…" : p.type === "anthropic" ? "sk-ant-…" : "api key"}
+              value={key[p.id] ?? ""}
+              autoComplete="off"
+              onChange={(e) => setKeyFor(p.id, e.currentTarget.value)}
+            />
+            <button
+              className="btn-mini"
+              disabled={!(key[p.id] ?? "").trim()}
+              onClick={() => {
+                onSave(p, (key[p.id] ?? "").trim());
+                setKeyFor(p.id, "");
+              }}
+            >
+              save key
+            </button>
+
+            {p.type === "openai-compatible" && (
+              <button className="btn-mini" onClick={() => setEditingId(p.id)}>
+                edit
+              </button>
+            )}
+
+            {/* Anthropic is the built-in default: it can drop its key but isn't deleted. */}
+            {p.type === "anthropic"
+              ? p.keySet && (
+                  <button className="btn-mini danger" title="Remove key" onClick={onRemoveAnthropicKey}>
+                    ✕
+                  </button>
+                )
+              : confirmId === p.id
+                ? (
+                    <span className="mcp-confirm">
+                      <button
+                        className="btn-danger sm"
+                        onClick={() => {
+                          onDelete(p.id);
+                          setConfirmId(null);
+                        }}
+                      >
+                        delete
+                      </button>
+                      <button className="btn-mini" onClick={() => setConfirmId(null)}>
+                        ✕
+                      </button>
+                    </span>
+                  )
+                : (
+                    <button className="btn-mini danger" title="Delete provider" onClick={() => setConfirmId(p.id)}>
+                      ✕
+                    </button>
+                  )}
+          </div>
+        ),
+      )}
+
+      {adding ? (
+        <ProviderForm
+          onCancel={() => setAdding(false)}
+          onSubmit={(prov, apiKey) => {
+            onSave(prov, apiKey);
+            setAdding(false);
           }}
-        >
-          Save
+        />
+      ) : (
+        <button className="btn-secondary" onClick={() => setAdding(true)}>
+          + Add provider
         </button>
-        {configured && (
-          <button className="btn-danger" onClick={onRemove}>
-            Remove
-          </button>
-        )}
-      </div>
+      )}
       <p className="settings-hint">
-        Stored in the OS keychain, never in a file or shown back here. Execution is Anthropic-only;
-        more providers will arrive with multi-provider execution (#1).
+        Keys are stored in the OS keychain by provider id — never in a file or shown back here.
+        OpenAI-compatible providers run on Manual routing; pick them in the model picker.
       </p>
     </section>
+  );
+}
+
+// Add/edit form for an OpenAI-compatible provider (Anthropic is the built-in
+// default and isn't created here). Editing an existing one keeps its key unless a
+// new one is entered.
+function ProviderForm({
+  initial,
+  onSubmit,
+  onCancel,
+}: {
+  initial?: ProviderView;
+  onSubmit: (provider: ProviderView, apiKey?: string) => void;
+  onCancel: () => void;
+}) {
+  const [id, setId] = useState(initial?.id ?? "");
+  const [label, setLabel] = useState(initial?.label ?? "");
+  const [baseUrl, setBaseUrl] = useState(initial?.baseUrl ?? "");
+  const [modelId, setModelId] = useState(initial?.modelId ?? "");
+  const [apiKey, setApiKey] = useState("");
+  const editing = !!initial;
+
+  const valid = id.trim() && baseUrl.trim();
+
+  const submit = () => {
+    const provider: ProviderView = {
+      id: id.trim(),
+      type: "openai-compatible",
+      label: label.trim() || id.trim(),
+      baseUrl: baseUrl.trim(),
+      modelId: modelId.trim() || undefined,
+      enabled: initial?.enabled ?? true,
+      keySet: initial?.keySet,
+    };
+    onSubmit(provider, apiKey.trim() || undefined);
+  };
+
+  return (
+    <div className="mcp-form">
+      <div className="mcp-form-row">
+        <input
+          className="settings-input"
+          placeholder="id (e.g. openai)"
+          value={id}
+          disabled={editing}
+          onChange={(e) => setId(e.currentTarget.value)}
+        />
+        <input
+          className="settings-input"
+          placeholder="label"
+          value={label}
+          onChange={(e) => setLabel(e.currentTarget.value)}
+        />
+      </div>
+      <div className="mcp-form-row">
+        <input
+          className="settings-input grow"
+          placeholder="base URL (e.g. https://api.openai.com/v1)"
+          value={baseUrl}
+          onChange={(e) => setBaseUrl(e.currentTarget.value)}
+        />
+        <input
+          className="settings-input"
+          placeholder="default model (e.g. gpt-4o-mini)"
+          value={modelId}
+          onChange={(e) => setModelId(e.currentTarget.value)}
+        />
+      </div>
+      <div className="mcp-form-row">
+        <input
+          type="password"
+          className="settings-input grow"
+          placeholder={initial?.keySet ? "replace api key…" : "api key"}
+          value={apiKey}
+          autoComplete="off"
+          onChange={(e) => setApiKey(e.currentTarget.value)}
+        />
+      </div>
+      <div className="mcp-form-actions">
+        <button className="btn-mini" onClick={onCancel}>
+          cancel
+        </button>
+        <button className="btn-primary" disabled={!valid} onClick={submit}>
+          {editing ? "Save" : "Add"}
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -114,10 +287,12 @@ function ProvidersSection({
 function RoutingSection({
   value,
   models,
+  providers,
   onChange,
 }: {
   value: RoutingPolicy;
   models: ModelInfo[];
+  providers: ProviderView[];
   onChange: (p: RoutingPolicy) => void;
 }) {
   return (
@@ -125,7 +300,7 @@ function RoutingSection({
       <h3>Routing</h3>
       <div className="settings-row">
         <span className="settings-label">Default policy for new conversations</span>
-        <PolicyPicker value={value} models={models} onChange={(p) => p && onChange(p)} />
+        <PolicyPicker value={value} models={models} providers={providers} onChange={(p) => p && onChange(p)} />
       </div>
       <p className="settings-hint">The topbar and per-node pickers override this default per turn.</p>
     </section>

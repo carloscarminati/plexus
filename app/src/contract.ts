@@ -120,7 +120,7 @@ export interface Graph {
 export type RoutingObjective = "cost" | "quality" | "balanced";
 
 export type RoutingPolicy =
-  | { kind: "manual"; modelId: string }
+  | { kind: "manual"; modelId: string; providerId?: string }
   | { kind: "auto"; objective: RoutingObjective; budgetPerTurn?: number };
 
 export interface ModelInfo {
@@ -153,11 +153,25 @@ export interface McpServerView {
   httpCredentialSet?: boolean; // true if an HTTP credential is stored in the keychain
 }
 
+// Secret-free view of a provider (mirror of ProviderView in Contract/Transport.cs).
+export type ProviderType = "anthropic" | "openai-compatible";
+
+export interface ProviderView {
+  id: string;
+  type: ProviderType;
+  label?: string;
+  baseUrl?: string; // openai-compatible only
+  modelId?: string; // default model for the picker
+  enabled: boolean;
+  keySet?: boolean; // true if an API key is stored in the keychain for this id
+}
+
 export interface AppSettingsView {
   confirmTimeoutSeconds: number;
   defaultPolicy: RoutingPolicy;
   anthropicKeyConfigured: boolean;
   mcpServers: McpServerView[];
+  providers: ProviderView[];
 }
 
 export type ClientEvent =
@@ -185,7 +199,9 @@ export type ClientEvent =
   | { type: "set_anthropic_key"; key: string }
   | { type: "delete_anthropic_key" }
   | { type: "set_mcp_server"; server: McpServerView; httpCredential?: string }
-  | { type: "delete_mcp_server"; id: string };
+  | { type: "delete_mcp_server"; id: string }
+  | { type: "set_provider"; provider: ProviderView; apiKey?: string }
+  | { type: "delete_provider"; id: string };
 
 export type ServerEvent =
   | { type: "graphs"; graphs: { id: string; title?: string; updatedAt?: string; pinned?: boolean }[] }

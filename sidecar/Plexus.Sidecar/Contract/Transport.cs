@@ -29,6 +29,8 @@ namespace Plexus.Sidecar.Contract;
 [JsonDerivedType(typeof(DeleteAnthropicKeyEvent), "delete_anthropic_key")]
 [JsonDerivedType(typeof(SetMcpServerEvent), "set_mcp_server")]
 [JsonDerivedType(typeof(DeleteMcpServerEvent), "delete_mcp_server")]
+[JsonDerivedType(typeof(SetProviderEvent), "set_provider")]
+[JsonDerivedType(typeof(DeleteProviderEvent), "delete_provider")]
 public abstract class ClientEvent { }
 
 public sealed class LoadGraphEvent : ClientEvent
@@ -166,6 +168,33 @@ public sealed class McpTransportView
     public string? Url { get; set; }
 }
 
+// Providers CRUD (mirror of the MCP-server pattern). The non-secret config is
+// written to providers.json; the API key goes to the keychain by provider id,
+// never the file. Anthropic = the migrated default; openai-compatible = base URL
+// + model id + key (works with OpenAI, gateways, Ollama, any compatible server).
+public sealed class SetProviderEvent : ClientEvent
+{
+    public ProviderView Provider { get; set; } = new();
+    public string? ApiKey { get; set; } // optional; only present when (re)setting the key
+}
+
+public sealed class DeleteProviderEvent : ClientEvent
+{
+    public string Id { get; set; } = "";
+}
+
+// Secret-free view of a provider (mirror of ProviderConfig + a key-present flag).
+public sealed class ProviderView
+{
+    public string Id { get; set; } = "";
+    public string Type { get; set; } = "anthropic"; // "anthropic" | "openai-compatible"
+    public string? Label { get; set; }
+    public string? BaseUrl { get; set; }            // openai-compatible only
+    public string? ModelId { get; set; }            // default model for the picker
+    public bool Enabled { get; set; } = true;
+    public bool KeySet { get; set; }                // true if a keychain key exists for this id
+}
+
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "type")]
 [JsonDerivedType(typeof(GraphsServerEvent), "graphs")]
 [JsonDerivedType(typeof(GraphServerEvent), "graph")]
@@ -186,6 +215,7 @@ public sealed class SettingsServerEvent : ServerEvent
     public RoutingPolicy DefaultPolicy { get; set; } = RoutingPolicy.Manual("claude-opus-4-8");
     public bool AnthropicKeyConfigured { get; set; }
     public List<McpServerView> McpServers { get; set; } = new();
+    public List<ProviderView> Providers { get; set; } = new();
 }
 
 // M0 — the host asks the user to approve a non-read-only MCP tool call.

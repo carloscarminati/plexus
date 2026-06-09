@@ -22,13 +22,17 @@ public sealed class ModelRegistry
     private List<ProviderConfig> _providers = new();
 
     public ModelRegistry(HttpClient http, ILogger<ModelRegistry> log)
+        : this(http, log, Path.GetDirectoryName(GraphDir())!) { }
+
+    // Test seam: an explicit config directory so provider CRUD can be exercised in
+    // isolation, without touching the user's ~/.plexus/providers.json.
+    internal ModelRegistry(HttpClient http, ILogger<ModelRegistry> log, string configDir)
     {
         _http = http;
         _log = log;
-        var dir = Path.GetDirectoryName(GraphDir())!;
-        Directory.CreateDirectory(dir);
-        _cachePath = Path.Combine(dir, "models.json");
-        _providersPath = Path.Combine(dir, "providers.json");
+        Directory.CreateDirectory(configDir);
+        _cachePath = Path.Combine(configDir, "models.json");
+        _providersPath = Path.Combine(configDir, "providers.json");
         _providers = LoadProviders();
     }
 
@@ -38,7 +42,54 @@ public sealed class ModelRegistry
     public string DefaultProviderId =>
         _providers.FirstOrDefault(p => p.Enabled)?.Id ?? "anthropic";
 
-    public IReadOnlyList<ProviderConfig> Providers => _providers;
+    public IReadOnlyList<ProviderConfig> Providers
+    {
+        get { lock (_gate) return _providers.ToList(); }
+    }
+
+    public ProviderConfig? GetProvider(string id)
+    {
+        lock (_gate)
+            return _providers.FirstOrDefault(p => string.Equals(p.Id, id, StringComparison.OrdinalIgnoreCase));
+    }
+
+    // CRUD for the Providers settings panel. providers.json is the source of truth;
+    // secrets are NEVER written here — the API key lives in the keychain by provider
+    // id (see KeychainService). Upsert by id, persist, return the stored config.
+    public ProviderConfig SetProvider(ProviderConfig provider)
+    {
+        lock (_gate)
+        {
+            var existing = _providers.FirstOrDefault(p => string.Equals(p.Id, provider.Id, StringComparison.OrdinalIgnoreCase));
+            if (existing is null)
+                _providers.Add(provider);
+            else
+            {
+                existing.Type = provider.Type;
+                existing.Label = provider.Label;
+                existing.BaseUrl = provider.BaseUrl;
+                existing.ModelId = provider.ModelId;
+                existing.Enabled = provider.Enabled;
+            }
+            SaveProviders();
+            return existing ?? provider;
+        }
+    }
+
+    public void DeleteProvider(string id)
+    {
+        lock (_gate)
+        {
+            _providers.RemoveAll(p => string.Equals(p.Id, id, StringComparison.OrdinalIgnoreCase));
+            SaveProviders();
+        }
+    }
+
+    private void SaveProviders()
+    {
+        try { File.WriteAllText(_providersPath, JsonSerializer.Serialize(_providers, PlexusJson.Options)); }
+        catch { /* best-effort; in-memory list still applies this session */ }
+    }
 
     // Ensure metadata is available: load a fresh cache, else fetch. Best-effort —
     // on failure we still serve fallback pricing for known models.
@@ -221,7 +272,13 @@ public sealed class ModelRegistry
             // fall through to default
         }
 
-        var defaults = new List<ProviderConfig> { new() { Id = "anthropic", Enabled = true } };
+        // Migration (additive): seed a default Anthropic provider. Its id "anthropic"
+        // already maps to the legacy keychain entry ("plexus-anthropic-key"), so an
+        // existing key keeps working with zero re-entry.
+        var defaults = new List<ProviderConfig>
+        {
+            new() { Id = "anthropic", Type = "anthropic", Label = "Anthropic", ModelId = "claude-opus-4-8", Enabled = true },
+        };
         try
         {
             File.WriteAllText(_providersPath, JsonSerializer.Serialize(defaults, PlexusJson.Options));

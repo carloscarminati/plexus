@@ -5,8 +5,11 @@ namespace Plexus.Sidecar.Routing;
 
 public sealed class ProviderConfig
 {
-    public string Id { get; set; } = "";   // "anthropic", "openai", "ollama", ...
-    public string? BaseUrl { get; set; }    // self-hosted / gateways / Ollama
+    public string Id { get; set; } = "";            // "anthropic", "openai", "ollama", ...
+    public string Type { get; set; } = "anthropic"; // "anthropic" | "openai-compatible"
+    public string? Label { get; set; }              // display name; falls back to Id
+    public string? BaseUrl { get; set; }            // openai-compatible: gateway/self-hosted/Ollama URL
+    public string? ModelId { get; set; }            // default model for this provider's picker
     public bool Enabled { get; set; } = true;
     // API key is NOT here — it lives in the OS keychain, referenced by provider id.
 }

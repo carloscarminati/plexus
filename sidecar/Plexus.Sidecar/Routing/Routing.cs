@@ -4,9 +4,10 @@ namespace Plexus.Sidecar.Routing;
 // intelligence later: ManualRouter today, HeuristicRouter/LearnedRouter behind
 // the same interface in R1/R2.
 
-public sealed record RoutingPolicy(string Kind, string? ModelId = null, string? Objective = null, double? BudgetPerTurn = null)
+public sealed record RoutingPolicy(string Kind, string? ModelId = null, string? Objective = null, double? BudgetPerTurn = null, string? ProviderId = null)
 {
-    public static RoutingPolicy Manual(string modelId) => new("manual", ModelId: modelId);
+    public static RoutingPolicy Manual(string modelId, string? providerId = null) =>
+        new("manual", ModelId: modelId, ProviderId: providerId);
     public static RoutingPolicy Auto(string objective, double? budgetPerTurn = null) =>
         new("auto", Objective: objective, BudgetPerTurn: budgetPerTurn);
 }
@@ -45,8 +46,11 @@ public sealed class ManualRouter : IModelRouter
         var modelId = ctx.Policy.ModelId
             ?? throw new InvalidOperationException("ManualRouter requires policy.ModelId.");
 
+        // An explicit ProviderId on the policy wins — that's how a manually chosen
+        // openai-compatible model (absent from models.dev) routes to the right client.
+        // Otherwise fall back to the curated metadata's provider, then the default.
         var meta = _registry.GetMetadata(modelId);
-        var providerId = meta?.ProviderId ?? _registry.DefaultProviderId;
+        var providerId = ctx.Policy.ProviderId ?? meta?.ProviderId ?? _registry.DefaultProviderId;
 
         var unmet = meta is null ? new List<string>() : Unmet(meta, ctx.Requires);
         var reason = unmet.Count == 0

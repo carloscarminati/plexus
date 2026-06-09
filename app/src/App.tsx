@@ -54,10 +54,11 @@ function App() {
     settings,
     setGeneralSettings,
     setDefaultPolicy,
-    setAnthropicKey,
     deleteAnthropicKey,
     setMcpServer,
     deleteMcpServer,
+    setProvider,
+    deleteProvider,
   } = useSidecar();
   const [draft, setDraft] = useState("");
   const [showSettings, setShowSettings] = useState(false);
@@ -235,6 +236,7 @@ function App() {
             value={sessionPolicy}
             onChange={(p) => p && setSessionPolicy(p)}
             models={models}
+            providers={settings?.providers ?? []}
           />
           <button
             className="compose-btn"
@@ -329,6 +331,7 @@ function App() {
                     value={nodeOverrides[selected.id] ?? null}
                     onChange={(p) => setNodeOverride(selected.id, p)}
                     models={models}
+                    providers={settings?.providers ?? []}
                     allowInherit
                   />
                   {selected.meta?.reason && <span className="branch-reason">{selected.meta.reason}</span>}
@@ -346,6 +349,7 @@ function App() {
                         value={escalatePolicy}
                         onChange={(p) => setEscalatePolicy(p ?? { kind: "auto", objective: "quality" })}
                         models={models}
+                        providers={settings?.providers ?? []}
                       />
                       <button
                         className="escalate-btn"
@@ -463,10 +467,11 @@ function App() {
           onClose={() => setShowSettings(false)}
           setGeneralSettings={setGeneralSettings}
           setDefaultPolicy={setDefaultPolicy}
-          setAnthropicKey={setAnthropicKey}
           deleteAnthropicKey={deleteAnthropicKey}
           setMcpServer={setMcpServer}
           deleteMcpServer={deleteMcpServer}
+          setProvider={setProvider}
+          deleteProvider={deleteProvider}
         />
       )}
 

@@ -229,6 +229,14 @@ public sealed class WebSocketHub
             case DeleteMcpServerEvent dm:
                 await HandleDeleteMcpServerAsync(dm.Id);
                 break;
+
+            case SetProviderEvent sp:
+                await HandleSetProviderAsync(sp);
+                break;
+
+            case DeleteProviderEvent dpr:
+                await HandleDeleteProviderAsync(dpr.Id);
+                break;
         }
     }
 
@@ -257,13 +265,64 @@ public sealed class WebSocketHub
             HttpCredentialSet = cfg.Transport.Kind == "http" && _keychain.HasKey($"mcp-{cfg.Id}"),
         }).ToList();
 
+        var providers = _registry.Providers.Select(p => new ProviderView
+        {
+            Id = p.Id,
+            Type = p.Type,
+            Label = p.Label,
+            BaseUrl = p.BaseUrl,
+            ModelId = p.ModelId,
+            Enabled = p.Enabled,
+            KeySet = _keychain.HasKey(p.Id),
+        }).ToList();
+
         return new SettingsServerEvent
         {
             ConfirmTimeoutSeconds = s.ConfirmTimeoutSeconds,
             DefaultPolicy = s.DefaultPolicy,
             AnthropicKeyConfigured = _keychain.HasKey("anthropic"),
             McpServers = servers,
+            Providers = providers,
         };
+    }
+
+    private async Task HandleSetProviderAsync(SetProviderEvent sp)
+    {
+        var v = sp.Provider;
+        if (string.IsNullOrWhiteSpace(v.Id))
+        {
+            await SendAsync(new ErrorServerEvent { Message = "Provider needs an id." });
+            return;
+        }
+        if (string.Equals(v.Type, "openai-compatible", StringComparison.OrdinalIgnoreCase)
+            && string.IsNullOrWhiteSpace(v.BaseUrl))
+        {
+            await SendAsync(new ErrorServerEvent { Message = "An OpenAI-compatible provider needs a base URL." });
+            return;
+        }
+
+        _registry.SetProvider(new Routing.ProviderConfig
+        {
+            Id = v.Id,
+            Type = string.IsNullOrWhiteSpace(v.Type) ? "anthropic" : v.Type,
+            Label = string.IsNullOrWhiteSpace(v.Label) ? null : v.Label,
+            BaseUrl = string.IsNullOrWhiteSpace(v.BaseUrl) ? null : v.BaseUrl,
+            ModelId = string.IsNullOrWhiteSpace(v.ModelId) ? null : v.ModelId,
+            Enabled = v.Enabled,
+        }); // secrets are NOT written here
+
+        // The API key (optional) goes to the keychain by provider id, never the file.
+        if (!string.IsNullOrWhiteSpace(sp.ApiKey))
+            _keychain.SetKey(v.Id, sp.ApiKey!.Trim());
+
+        await SendAsync(BuildSettingsEvent());
+    }
+
+    private async Task HandleDeleteProviderAsync(string id)
+    {
+        _registry.DeleteProvider(id);
+        _keychain.DeleteKey(id); // drop the stored API key for this provider
+        await SendAsync(BuildSettingsEvent());
     }
 
     private async Task HandleSetMcpServerAsync(SetMcpServerEvent ms)

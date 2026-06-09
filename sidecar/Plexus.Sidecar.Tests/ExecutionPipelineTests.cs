@@ -68,9 +68,9 @@ public class ExecutionPipelineTests
     [Fact]
     public void Factory_UnknownProvider_Throws()
     {
-        var factory = new ChatClientFactory(new KeychainService());
+        var factory = new ChatClientFactory(new KeychainService(), ProvidersTests.IsolatedRegistry());
 
-        Assert.Throws<InvalidOperationException>(() => factory.For("openai-compatible", "gpt-4o-mini"));
+        Assert.Throws<InvalidOperationException>(() => factory.For("some-unconfigured-provider", "gpt-4o-mini"));
     }
 
     // The Anthropic provider (default + explicit id) builds a client when a key is present.
@@ -83,7 +83,7 @@ public class ExecutionPipelineTests
         Environment.SetEnvironmentVariable("ANTHROPIC_API_KEY", "sk-ant-test-key");
         try
         {
-            var factory = new ChatClientFactory(new KeychainService());
+            var factory = new ChatClientFactory(new KeychainService(), ProvidersTests.IsolatedRegistry());
 
             using var client = factory.For(providerId, "claude-haiku-4-5");
 

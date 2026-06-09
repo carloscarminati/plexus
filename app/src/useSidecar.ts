@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AppSettingsView, ClientEvent, Graph, McpServerView, ModelInfo, RoutingPolicy, ServerEvent } from "./contract";
+import type { AppSettingsView, ClientEvent, Graph, McpServerView, ModelInfo, ProviderView, RoutingPolicy, ServerEvent } from "./contract";
 
 const SIDECAR_URL = "ws://127.0.0.1:8765/ws";
 
@@ -100,6 +100,7 @@ export function useSidecar() {
             defaultPolicy: msg.defaultPolicy,
             anthropicKeyConfigured: msg.anthropicKeyConfigured,
             mcpServers: msg.mcpServers,
+            providers: msg.providers ?? [],
           });
           break;
         case "tool_confirmation_request":
@@ -207,6 +208,11 @@ export function useSidecar() {
     [send],
   );
   const deleteMcpServer = useCallback((id: string) => send({ type: "delete_mcp_server", id }), [send]);
+  const setProvider = useCallback(
+    (provider: ProviderView, apiKey?: string) => send({ type: "set_provider", provider, apiKey }),
+    [send],
+  );
+  const deleteProvider = useCallback((id: string) => send({ type: "delete_provider", id }), [send]);
 
   // Click a node: plain click selects only it; shift/cmd-click toggles it in the
   // set (for a DAG merge of ≥2 nodes).
@@ -332,5 +338,7 @@ export function useSidecar() {
     deleteAnthropicKey,
     setMcpServer,
     deleteMcpServer,
+    setProvider,
+    deleteProvider,
   };
 }
