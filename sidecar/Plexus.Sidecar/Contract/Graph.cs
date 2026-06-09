@@ -15,6 +15,7 @@ public sealed class Node
     public List<Block> Blocks { get; set; } = new();
     public string Raw { get; set; } = ""; // model's original text — re-fed on resume
     public NodeMeta? Meta { get; set; }
+    public ReasoningMeta? Reasoning { get; set; } // ADR-0002 R0: graph-layer role/provenance; null = legacy
 }
 
 public sealed class NodeMeta
@@ -45,6 +46,12 @@ public sealed class Edge
 {
     public string From { get; set; } = "";
     public string To { get; set; } = "";
+    // ADR-0002 R0: a typed reasoning relation (one of ReasoningEdges). Null = a legacy
+    // structural branch/merge edge (derived from parentId), unchanged in behavior.
+    public string? Kind { get; set; }
+    // Signed evidence weight for supports/refutes edges (supports > 0, refutes < 0 by
+    // convention); null for non-weighted edge kinds.
+    public double? Weight { get; set; }
 }
 
 public sealed class Graph
