@@ -53,24 +53,25 @@ public class InvestigatorLiveSmokeTests
         }
 
         var model = Environment.GetEnvironmentVariable("PLEXUS_SMOKE_MODEL") ?? "claude-haiku-4-5";
+        var escalateModel = Environment.GetEnvironmentVariable("PLEXUS_SMOKE_ESCALATE_MODEL"); // null = no escalation
         var iterations = int.TryParse(Environment.GetEnvironmentVariable("PLEXUS_SMOKE_ITERATIONS"), out var n) && n > 0 ? n : 1;
         var factory = new ChatClientFactory(new KeychainService(), ProvidersTests.IsolatedRegistry());
         using var client = factory.For("anthropic", model);
         var caseText = ResolveCase();
 
-        Log($"model={model} iterations={iterations} caseChars={caseText.Length}");
+        Log($"model={model} escalateModel={escalateModel ?? "(none)"} iterations={iterations} caseChars={caseText.Length}");
         Log($"case: {caseText.Replace('\n', ' ')[..Math.Min(140, caseText.Length)]}…");
 
         var stepStructural = new Dictionary<string, List<int>>(StringComparer.Ordinal);
         var stepReferential = new Dictionary<string, List<int>>(StringComparer.Ordinal);
-        int okRuns = 0, soundRuns = 0, openTotal = 0;
+        int okRuns = 0, soundRuns = 0, openTotal = 0, escalatedRuns = 0;
 
         for (var i = 1; i <= iterations; i++)
         {
             RecipeRunResult run;
             try
             {
-                run = await RecipeExecutor.RunAsync(client, Recipes.Investigator, model, context: caseText, maxAttempts: 4);
+                run = await RecipeExecutor.RunAsync(client, Recipes.Investigator, model, context: caseText, escalateModelId: escalateModel, maxAttempts: 4);
             }
             catch (Exception ex)
             {
@@ -96,10 +97,12 @@ public class InvestigatorLiveSmokeTests
                 Accumulate(stepReferential, s.StepId, s.ReferentialFailures);
             }
 
+            var esc = run.EscalatedSteps is { Count: > 0 } es ? $" escalated=[{string.Join(",", es)}]" : "";
+            if (run.EscalatedSteps is { Count: > 0 }) escalatedRuns++;
             var diag = v.Diagnostics.Count == 0 ? "" : " | " + string.Join("; ", v.Diagnostics.Select(d => $"{d.Severity}:{d.Code}"));
             Log($"run {i,2}/{iterations}: ok={run.Ok,-5} sound={sound,-5} "
                 + $"R1[err={v.HasErrors} flag={v.HasFlags} warn={v.Diagnostics.Count} open={v.OpenUncertainties.Count}] "
-                + $"failedStep={run.FailedStepId ?? "-"} nodes={run.Graph.Nodes.Count} edges={run.Graph.Edges.Count}{diag}");
+                + $"failedStep={run.FailedStepId ?? "-"} nodes={run.Graph.Nodes.Count} edges={run.Graph.Edges.Count}{esc}{diag}");
         }
 
         Log("── per-step retry distribution (min/median/max across runs) ──");
@@ -109,7 +112,7 @@ public class InvestigatorLiveSmokeTests
         // The thesis line: wiring (okRuns) vs soundness (soundRuns). A run wiring through
         // proves the scaffolding; R1-sound runs are the actual bet — read soundRuns/N.
         Log($"── thesis: wired {okRuns}/{iterations} | R1-sound {soundRuns}/{iterations} (no invariant violations) "
-            + $"| open uncertainties surfaced {openTotal} total (limitations, not unsoundness) ──");
+            + $"| escalated {escalatedRuns}/{iterations} | open uncertainties surfaced {openTotal} total (limitations, not unsoundness) ──");
 
         // Gate only the wiring (the scaffolding must produce a graph at least once);
         // soundness is measured, not asserted (it's the stochastic thesis signal).

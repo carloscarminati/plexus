@@ -24,7 +24,11 @@ public sealed record RecipeRunResult(
     Graph Graph,
     string? Error = null,
     string? FailedStepId = null,
-    IReadOnlyList<StepReport>? Steps = null);
+    IReadOnlyList<StepReport>? Steps = null,
+    // ADR-0002 escalate: step ids re-run with a stronger model after R1 flagged the
+    // small-model output (empty when nothing escalated). Per-node — the sound front
+    // (facts/hypotheses) is kept; only the contested tail is re-run.
+    IReadOnlyList<string>? EscalatedSteps = null);
 
 // Per-step instrumentation for the live smoke: how many auto-fix retries each step
 // needed, split by failure kind (structural shape vs referential bad-ref), and whether
@@ -45,6 +49,7 @@ public static class RecipeExecutor
         Recipe recipe,
         string modelId,
         string? context = null, // the case/material under investigation, shared by every step
+        string? escalateModelId = null, // stronger model to re-run the contested tail on an R1 flag
         Func<RecipeStep, Graph, CancellationToken, Task>? onDecisionSeam = null,
         int maxAttempts = 3,
         CancellationToken ct = default)
@@ -74,7 +79,52 @@ public static class RecipeExecutor
                 await onDecisionSeam(step, state.Graph, ct);
         }
 
-        return new RecipeRunResult(true, state.Graph, Steps: reports);
+        var escalated = escalateModelId is null
+            ? Array.Empty<string>()
+            : await EscalateContestedAsync(client, recipe, escalateModelId, context, state, reports, maxAttempts, ct);
+
+        return new RecipeRunResult(true, state.Graph, Steps: reports, EscalatedSteps: escalated);
+    }
+
+    // ADR-0002 per-node escalate: when R1 flags the small-model graph, re-run the
+    // CONTESTED tail with a stronger model, keeping the sound front intact. A
+    // net-negative selection contests the EVALUATION (the weighing) — so we re-run from
+    // the evaluation step onward (evaluation → conclusion), re-weighing the evidence and
+    // re-concluding, while facts/uncertainties/hypotheses stay put. Returns the step ids
+    // re-run (empty if nothing was flagged).
+    private static async Task<IReadOnlyList<string>> EscalateContestedAsync(
+        IChatClient client, Recipe recipe, string escalateModelId, string? context,
+        RunState state, List<StepReport> reports, int maxAttempts, CancellationToken ct)
+    {
+        var v = ReasoningGraphValidator.Validate(state.Graph);
+        if (!v.Diagnostics.Any(d => d.Code == ReasoningDiagnosticCodes.ConclusionNetNegative))
+            return Array.Empty<string>();
+
+        var from = recipe.Steps.FindIndex(s => s.Role == ReasoningRoles.Evaluation);
+        if (from < 0)
+            return Array.Empty<string>();
+
+        var tail = recipe.Steps.Skip(from).ToList();
+        state.RemoveByRoles(tail.Select(s => s.Role).ToHashSet());
+
+        var escalated = new List<string>();
+        foreach (var step in tail)
+        {
+            var schema = SchemaForStep(step);
+            var instruction = BuildInstruction(step, state, context);
+            var result = await SchemaConstrainedEmitter.EmitAsync(
+                client, escalateModelId, instruction, schema, maxAttempts,
+                postStructuralCheck: RefCheckFor(step, state), ct: ct);
+
+            reports.Add(new StepReport($"{step.Id}*escalated", step.Role, result.Ok, result.Attempts,
+                result.StructuralFailures, result.PostStructuralFailures));
+            if (!result.Ok || result.Value is null)
+                break; // escalation failed to emit; leave what we have, record what we tried
+
+            ApplyStep(step, result.Value, state);
+            escalated.Add(step.Id);
+        }
+        return escalated;
     }
 
     // The model instruction = the step's (config) prompt + the dynamic ref context a
@@ -307,6 +357,25 @@ public static class RecipeExecutor
             var rf = $"{prefix}{n}";
             RefToId[rf] = nodeId;
             Refs.Add((rf, prefix, text));
+        }
+
+        // Drop all nodes of the given reasoning roles (and any edge touching them, and
+        // their refs), so an escalation pass can re-run those steps from scratch. The
+        // sound front (other roles) is untouched.
+        public void RemoveByRoles(IReadOnlySet<string> roles)
+        {
+            var removedIds = Graph.Nodes.Where(n => n.Reasoning?.Role is { } r && roles.Contains(r))
+                .Select(n => n.Id).ToHashSet(StringComparer.Ordinal);
+            Graph.Nodes.RemoveAll(n => removedIds.Contains(n.Id));
+            Graph.Edges.RemoveAll(e => removedIds.Contains(e.From) || removedIds.Contains(e.To));
+
+            var prefixes = roles.Select(RefPrefix).ToHashSet(StringComparer.Ordinal);
+            foreach (var (rf, prefix, _) in Refs.Where(r => prefixes.Contains(r.Prefix)).ToList())
+            {
+                RefToId.Remove(rf);
+                _roleCounters.Remove(prefix);
+            }
+            Refs.RemoveAll(r => prefixes.Contains(r.Prefix));
         }
     }
 }
