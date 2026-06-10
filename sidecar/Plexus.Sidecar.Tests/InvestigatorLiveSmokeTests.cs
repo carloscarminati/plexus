@@ -26,13 +26,22 @@ public class InvestigatorLiveSmokeTests
     public InvestigatorLiveSmokeTests(ITestOutputHelper output) => _out = output;
 
     // A representative case beats the toy: the counters only predict R2.2 if the case
-    // resembles real complexity. Swap this for a real control investigation from the
-    // CMP/Collahuasi catalog when running the thesis smoke.
+    // resembles real complexity. Override with a real control investigation via
+    // PLEXUS_SMOKE_CASE_FILE=<path> (or PLEXUS_SMOKE_CASE=<inline>); falls back to this toy.
     private const string CaseText =
         "CASE: A nightly batch job silently skipped ~2,000 records last week; finance found a "
         + "reconciliation gap. The job exited with status 0 (no error). A config flag 'strictMode' "
         + "was switched off in a deploy two days earlier. The on-call engineer says throughput "
         + "looked normal. There is no alert on records-processed count.";
+
+    private static string ResolveCase()
+    {
+        var file = Environment.GetEnvironmentVariable("PLEXUS_SMOKE_CASE_FILE");
+        if (!string.IsNullOrWhiteSpace(file) && File.Exists(file))
+            return File.ReadAllText(file);
+        var inline = Environment.GetEnvironmentVariable("PLEXUS_SMOKE_CASE");
+        return string.IsNullOrWhiteSpace(inline) ? CaseText : inline;
+    }
 
     [Fact]
     public async Task InvestigatorLiveSmoke()
@@ -47,8 +56,10 @@ public class InvestigatorLiveSmokeTests
         var iterations = int.TryParse(Environment.GetEnvironmentVariable("PLEXUS_SMOKE_ITERATIONS"), out var n) && n > 0 ? n : 1;
         var factory = new ChatClientFactory(new KeychainService(), ProvidersTests.IsolatedRegistry());
         using var client = factory.For("anthropic", model);
+        var caseText = ResolveCase();
 
-        Log($"model={model} iterations={iterations}");
+        Log($"model={model} iterations={iterations} caseChars={caseText.Length}");
+        Log($"case: {caseText.Replace('\n', ' ')[..Math.Min(140, caseText.Length)]}…");
 
         var stepStructural = new Dictionary<string, List<int>>(StringComparer.Ordinal);
         var stepReferential = new Dictionary<string, List<int>>(StringComparer.Ordinal);
@@ -59,7 +70,7 @@ public class InvestigatorLiveSmokeTests
             RecipeRunResult run;
             try
             {
-                run = await RecipeExecutor.RunAsync(client, Recipes.Investigator, model, context: CaseText, maxAttempts: 4);
+                run = await RecipeExecutor.RunAsync(client, Recipes.Investigator, model, context: caseText, maxAttempts: 4);
             }
             catch (Exception ex)
             {
