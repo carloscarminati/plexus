@@ -1,5 +1,4 @@
 using System.Text.Json.Nodes;
-using Microsoft.Extensions.AI;
 using Plexus.Sidecar.Contract;
 using Plexus.Sidecar.Model;
 
@@ -59,31 +58,5 @@ public class SchemaConstrainedEmitterTests
         Assert.Contains(errs, e => e.Contains("sourceRef", StringComparison.OrdinalIgnoreCase));
 
         Assert.True(JsonSchemaGen.Validate(ReasoningSchemas.Fact, JsonNode.Parse(ValidFact), out _));
-    }
-
-    // A scripted model: returns canned replies in order (then "{}" once exhausted),
-    // counting calls so a test can assert how many times the loop re-prompted.
-    private sealed class ScriptedChatClient : IChatClient
-    {
-        private readonly Queue<string> _replies;
-        public int Calls { get; private set; }
-
-        public ScriptedChatClient(params string[] replies) => _replies = new Queue<string>(replies);
-
-        public Task<ChatResponse> GetResponseAsync(
-            IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
-        {
-            Calls++;
-            var text = _replies.Count > 0 ? _replies.Dequeue() : "{}";
-            return Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, text)));
-        }
-
-        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
-            IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
-
-        public object? GetService(Type serviceType, object? serviceKey = null) => null;
-
-        public void Dispose() { }
     }
 }
