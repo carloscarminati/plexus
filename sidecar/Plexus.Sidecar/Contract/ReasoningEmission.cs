@@ -21,11 +21,42 @@ public sealed class FactEmission
 public sealed class HypothesisEmission
 {
     [JsonRequired] public string Statement { get; set; } = ""; // a candidate explanation
+    public List<string>? Addresses { get; set; }               // uncertainty refs this hypothesis would resolve
 }
 
 public sealed class UncertaintyEmission
 {
     [JsonRequired] public string Question { get; set; } = ""; // a gap / unknown to resolve
+}
+
+public sealed class FrameEmission
+{
+    [JsonRequired] public string Question { get; set; } = ""; // the case question
+    public string? Scope { get; set; }                        // scope / constraints
+}
+
+// One weighing in the evaluation step: a fact for/against a hypothesis, by magnitude.
+// Weight is a 0..1 MAGNITUDE — the sign comes from Stance (supports/refutes). It maps
+// directly to Edge.Weight (the non-derivable datum R2.1 must persist), so the
+// evaluation round-trips without a DTO redo when relational-edge persistence lands.
+public sealed class WeighingEmission
+{
+    [JsonRequired] public string Fact { get; set; } = "";       // a fact ref
+    [JsonRequired] public string Hypothesis { get; set; } = ""; // a hypothesis ref
+    [JsonRequired] public string Stance { get; set; } = "";     // "supports" | "refutes"
+    [JsonRequired] public double Weight { get; set; }           // magnitude → Edge.Weight
+}
+
+public sealed class EvaluationEmission
+{
+    [JsonRequired] public List<WeighingEmission> Weighings { get; set; } = new();
+}
+
+public sealed class ConclusionEmission
+{
+    [JsonRequired] public string Selects { get; set; } = "";  // the chosen hypothesis ref
+    [JsonRequired] public List<string> Cites { get; set; } = new(); // fact refs the chain renders
+    public string? Summary { get; set; }
 }
 
 // Compiled schemas for the reasoning emission payloads. Built once via JsonSchemaGen
