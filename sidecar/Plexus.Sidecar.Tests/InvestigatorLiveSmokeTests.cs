@@ -99,6 +99,20 @@ public class InvestigatorLiveSmokeTests
                 Accumulate(stepReferential, s.StepId, s.ReferentialFailures);
             }
 
+            // Fidelity read (R2.2.0-fidelity calibration): dump the first grounded run's
+            // claim→source pairs so we can eyeball whether the model cites faithfully or
+            // launders (cites a real source for a claim that isn't in it).
+            if (grounded && i == 1)
+            {
+                var byId = run.Graph.Nodes.ToDictionary(nd => nd.Id, nd => nd.Raw);
+                foreach (var g in run.Graph.Edges.Where(e => e.Kind == "grounds"))
+                {
+                    var claim = byId.GetValueOrDefault(g.From, "?");
+                    var src = byId.GetValueOrDefault(g.To, "?");
+                    Log($"    ground: \"{claim[..Math.Min(80, claim.Length)]}\"  →  [{g.To}] \"{src[..Math.Min(80, src.Length)]}\"");
+                }
+            }
+
             var esc = run.EscalatedSteps is { Count: > 0 } es ? $" escalated=[{string.Join(",", es)}]" : "";
             if (run.EscalatedSteps is { Count: > 0 }) escalatedRuns++;
             var diag = v.Diagnostics.Count == 0 ? "" : " | " + string.Join("; ", v.Diagnostics.Select(d => $"{d.Severity}:{d.Code}"));
