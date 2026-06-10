@@ -55,13 +55,16 @@ public class InvestigatorLiveSmokeTests
         var model = Environment.GetEnvironmentVariable("PLEXUS_SMOKE_MODEL") ?? "claude-haiku-4-5";
         var escalateModel = Environment.GetEnvironmentVariable("PLEXUS_SMOKE_ESCALATE_MODEL"); // null = no escalation
         var grounded = Environment.GetEnvironmentVariable("PLEXUS_SMOKE_GROUND") == "1"; // ground facts in the mock corpus
+        var fidelityModel = Environment.GetEnvironmentVariable("PLEXUS_SMOKE_FIDELITY"); // a judge model id, or null
         var iterations = int.TryParse(Environment.GetEnvironmentVariable("PLEXUS_SMOKE_ITERATIONS"), out var n) && n > 0 ? n : 1;
         var factory = new ChatClientFactory(new KeychainService(), ProvidersTests.IsolatedRegistry());
         using var client = factory.For("anthropic", model);
         var caseText = ResolveCase();
         var factSource = grounded ? new CuratedFactSource() : null;
+        IFidelityJudge? fidelityJudge = grounded && !string.IsNullOrWhiteSpace(fidelityModel)
+            ? new LlmFidelityJudge(client, fidelityModel) : null;
 
-        Log($"model={model} escalateModel={escalateModel ?? "(none)"} grounded={grounded} iterations={iterations} caseChars={caseText.Length}");
+        Log($"model={model} escalateModel={escalateModel ?? "(none)"} grounded={grounded} fidelity={fidelityModel ?? "(off)"} iterations={iterations} caseChars={caseText.Length}");
         Log($"case: {caseText.Replace('\n', ' ')[..Math.Min(140, caseText.Length)]}…");
 
         var stepStructural = new Dictionary<string, List<int>>(StringComparer.Ordinal);
@@ -73,7 +76,7 @@ public class InvestigatorLiveSmokeTests
             RecipeRunResult run;
             try
             {
-                run = await RecipeExecutor.RunAsync(client, Recipes.Investigator, model, context: caseText, escalateModelId: escalateModel, factSource: factSource, maxAttempts: 4);
+                run = await RecipeExecutor.RunAsync(client, Recipes.Investigator, model, context: caseText, escalateModelId: escalateModel, factSource: factSource, fidelityJudge: fidelityJudge, maxAttempts: 4);
             }
             catch (Exception ex)
             {

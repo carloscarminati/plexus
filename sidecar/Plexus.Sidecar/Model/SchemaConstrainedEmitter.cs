@@ -40,11 +40,11 @@ public static class SchemaConstrainedEmitter
         int maxAttempts = 3,
         ChatResponseFormat? responseFormat = null, // opt-in constrained decoding; loop never depends on it
         // Optional check run AFTER structural validation, for constraints the schema
-        // can't express (e.g. referential integrity of emitted refs — a layer distinct
-        // from both schema-structure and R1 reasoning-soundness). Its errors feed the
-        // SAME bounded re-prompt loop — so a real model's bad ref is corrected, or
-        // surfaced explicitly on exhaustion. Never silently dropped downstream.
-        Func<JsonNode, IReadOnlyList<string>>? postStructuralCheck = null,
+        // can't express (referential integrity of emitted refs; grounding fidelity). Async
+        // because a check may itself call a model (the fidelity judge). Its errors feed the
+        // SAME bounded re-prompt loop — so a real model's bad ref / laundered claim is
+        // corrected, or surfaced explicitly on exhaustion. Never silently dropped.
+        Func<JsonNode, CancellationToken, Task<IReadOnlyList<string>>>? postStructuralCheck = null,
         CancellationToken ct = default)
     {
         var messages = new List<ChatMessage> { new(ChatRole.User, instruction) };
@@ -69,7 +69,9 @@ public static class SchemaConstrainedEmitter
             }
             else
             {
-                var checkErrors = postStructuralCheck?.Invoke(json) ?? Array.Empty<string>();
+                var checkErrors = postStructuralCheck is null
+                    ? Array.Empty<string>()
+                    : await postStructuralCheck(json, ct);
                 if (checkErrors.Count == 0)
                     return new SchemaEmissionResult(true, json, attempt, Array.Empty<string>(), null,
                         structuralFailures, postStructuralFailures);

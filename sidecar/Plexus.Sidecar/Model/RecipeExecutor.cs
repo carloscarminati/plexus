@@ -51,6 +51,7 @@ public static class RecipeExecutor
         string? context = null, // the case/material under investigation, shared by every step
         string? escalateModelId = null, // stronger model to re-run the contested tail on an R1 flag
         IFactSource? factSource = null, // R2.2: grounds facts in retrieved sources (null = ungrounded)
+        IFidelityJudge? fidelityJudge = null, // R2.2.0-fidelity: claim ⊆ source check (null = resolution only)
         Func<RecipeStep, Graph, CancellationToken, Task>? onDecisionSeam = null,
         int maxAttempts = 3,
         CancellationToken ct = default)
@@ -72,7 +73,7 @@ public static class RecipeExecutor
             var instruction = BuildInstruction(step, state, context);
             var result = await SchemaConstrainedEmitter.EmitAsync(
                 client, modelId, instruction, schema, maxAttempts,
-                postStructuralCheck: RefCheckFor(step, state), ct: ct);
+                postStructuralCheck: RefCheckFor(step, state, fidelityJudge), ct: ct);
 
             reports.Add(new StepReport(step.Id, step.Role, result.Ok, result.Attempts,
                 result.StructuralFailures, result.PostStructuralFailures));
@@ -90,7 +91,7 @@ public static class RecipeExecutor
 
         var escalated = escalateModelId is null
             ? Array.Empty<string>()
-            : await EscalateContestedAsync(client, recipe, escalateModelId, context, state, reports, maxAttempts, ct);
+            : await EscalateContestedAsync(client, recipe, escalateModelId, context, state, reports, fidelityJudge, maxAttempts, ct);
 
         return new RecipeRunResult(true, state.Graph, Steps: reports, EscalatedSteps: escalated);
     }
@@ -103,7 +104,7 @@ public static class RecipeExecutor
     // re-run (empty if nothing was flagged).
     private static async Task<IReadOnlyList<string>> EscalateContestedAsync(
         IChatClient client, Recipe recipe, string escalateModelId, string? context,
-        RunState state, List<StepReport> reports, int maxAttempts, CancellationToken ct)
+        RunState state, List<StepReport> reports, IFidelityJudge? fidelityJudge, int maxAttempts, CancellationToken ct)
     {
         var v = ReasoningGraphValidator.Validate(state.Graph);
         if (!v.Diagnostics.Any(d => d.Code == ReasoningDiagnosticCodes.ConclusionNetNegative))
@@ -123,7 +124,7 @@ public static class RecipeExecutor
             var instruction = BuildInstruction(step, state, context);
             var result = await SchemaConstrainedEmitter.EmitAsync(
                 client, escalateModelId, instruction, schema, maxAttempts,
-                postStructuralCheck: RefCheckFor(step, state), ct: ct);
+                postStructuralCheck: RefCheckFor(step, state, fidelityJudge), ct: ct);
 
             reports.Add(new StepReport($"{step.Id}*escalated", step.Role, result.Ok, result.Attempts,
                 result.StructuralFailures, result.PostStructuralFailures));
@@ -203,16 +204,40 @@ public static class RecipeExecutor
     // A real model sometimes references a ref that doesn't exist; rather than silently
     // drop the edge (which would hide the model's error and lose information — fatal in
     // an auditability tool), we feed it back to the auto-fix loop, then fail explicitly.
-    private static Func<JsonNode, IReadOnlyList<string>>? RefCheckFor(RecipeStep step, RunState state)
+    private static Func<JsonNode, CancellationToken, Task<IReadOnlyList<string>>>? RefCheckFor(
+        RecipeStep step, RunState state, IFidelityJudge? fidelityJudge)
     {
-        // Grounding check (R2.2): a grounded facts step must cite a RETRIEVED source id —
-        // makes provenance verifiable, and is auto-fixable (re-prompt with the valid ids).
+        // Grounded facts: two layers. RESOLUTION — the sourceRef must cite a retrieved
+        // source (sync, cheap). FIDELITY — the claim must be SUPPORTED by that source, not
+        // merely cite it (async, the judge); this is what blocks laundering. Both feed the
+        // same auto-fix loop.
         if (step.Role == ReasoningRoles.Fact && state.Sources.Count > 0)
-            return json => UngroundedFacts(json, state.SourceIds);
+            return (json, ct) => GroundedFactsCheckAsync(json, state, fidelityJudge, ct);
 
         return step.Role is ReasoningRoles.Hypothesis or ReasoningRoles.Evaluation or ReasoningRoles.Conclusion
-            ? json => UnresolvedRefs(step.Role, json, state.RefToId)
+            ? (json, _) => Task.FromResult(UnresolvedRefs(step.Role, json, state.RefToId))
             : null;
+    }
+
+    private static async Task<IReadOnlyList<string>> GroundedFactsCheckAsync(
+        JsonNode json, RunState state, IFidelityJudge? judge, CancellationToken ct)
+    {
+        var resolution = UngroundedFacts(json, state.SourceIds);
+        if (resolution.Count > 0 || judge is null)
+            return resolution; // don't judge fidelity until every ref resolves
+
+        var bad = new List<string>();
+        foreach (var f in json["facts"]?.AsArray() ?? new JsonArray())
+        {
+            var claim = (string?)f?["claim"];
+            var sref = (string?)f?["sourceRef"];
+            if (string.IsNullOrEmpty(claim) || sref is null)
+                continue;
+            var sourceText = state.SourceTextOf(sref);
+            if (sourceText is not null && !await judge.IsSupportedAsync(claim, sourceText, ct))
+                bad.Add($"the claim \"{Truncate(claim, 60)}\" is not supported by source '{sref}' — cite a source that supports it, or drop the claim");
+        }
+        return bad;
     }
 
     private static IReadOnlyList<string> UngroundedFacts(JsonNode json, IReadOnlySet<string> sourceIds)
@@ -379,6 +404,7 @@ public static class RecipeExecutor
         public List<(string Id, string Text)> Sources { get; } = new();
         public HashSet<string> SourceIds { get; } = new(StringComparer.Ordinal);
         private readonly Dictionary<string, string> _sourceKind = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, string> _sourceText = new(StringComparer.Ordinal);
         private readonly Dictionary<string, int> _roleCounters = new(StringComparer.Ordinal);
         private int _seq;
         private string? _frameId;
@@ -400,9 +426,11 @@ public static class RecipeExecutor
             Sources.Add((p.Id, p.Text));
             SourceIds.Add(p.Id);
             _sourceKind[p.Id] = p.Kind;
+            _sourceText[p.Id] = p.Text;
         }
 
         public string? SourceKindOf(string id) => _sourceKind.GetValueOrDefault(id);
+        public string? SourceTextOf(string id) => _sourceText.GetValueOrDefault(id);
 
         public string AddNode(string role, string text, ReasoningMeta reasoning)
         {
