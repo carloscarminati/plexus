@@ -57,6 +57,18 @@ public sealed class GraphStore
                 merge_parents_json TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_nodes_graph ON nodes(graph_id);
+            -- Semantic reasoning edges (ADR-0002 R2.1). Structural branch/merge edges are
+            -- still DERIVED from parentId on load (not stored); only typed edges with a
+            -- kind live here — their from/to/kind/weight are not recoverable from any node
+            -- field. `grounds` is excluded: it is derived from a fact's source_ref.
+            CREATE TABLE IF NOT EXISTS edges (
+                graph_id TEXT NOT NULL REFERENCES graphs(id) ON DELETE CASCADE,
+                from_id  TEXT NOT NULL,
+                to_id    TEXT NOT NULL,
+                kind     TEXT NOT NULL,
+                weight   REAL
+            );
+            CREATE INDEX IF NOT EXISTS idx_edges_graph ON edges(graph_id);
             """;
         cmd.ExecuteNonQuery();
 
@@ -274,7 +286,57 @@ public sealed class GraphStore
             }
         }
 
+        // Semantic reasoning edges (ADR-0002 R2.1), loaded from storage and merged with
+        // the derived structural edges. `grounds` is not here — it's derived from a
+        // fact's source_ref at compose time.
+        using (var ecmd = conn.CreateCommand())
+        {
+            ecmd.CommandText = "SELECT from_id, to_id, kind, weight FROM edges WHERE graph_id = $gid;";
+            ecmd.Parameters.AddWithValue("$gid", graphId);
+            using var reader = ecmd.ExecuteReader();
+            while (reader.Read())
+                graph.Edges.Add(new Edge
+                {
+                    From = reader.GetString(0),
+                    To = reader.GetString(1),
+                    Kind = reader.GetString(2),
+                    Weight = reader.IsDBNull(3) ? null : reader.GetDouble(3),
+                });
+        }
+
         return graph;
+    }
+
+    // Persist a graph's SEMANTIC edges (those with a kind). Replaces the stored set for
+    // the graph, so re-saving an edited reasoning graph is idempotent. Structural edges
+    // (kind == null) are skipped — they are derived from parentId on load.
+    public void SaveEdges(string graphId, IEnumerable<Edge> edges)
+    {
+        using var conn = Open();
+        using var tx = conn.BeginTransaction();
+
+        using (var del = conn.CreateCommand())
+        {
+            del.CommandText = "DELETE FROM edges WHERE graph_id = $gid;";
+            del.Parameters.AddWithValue("$gid", graphId);
+            del.ExecuteNonQuery();
+        }
+
+        foreach (var e in edges)
+        {
+            if (e.Kind is null)
+                continue; // structural — derived, not stored
+            using var ins = conn.CreateCommand();
+            ins.CommandText = "INSERT INTO edges (graph_id, from_id, to_id, kind, weight) VALUES ($gid, $from, $to, $kind, $weight);";
+            ins.Parameters.AddWithValue("$gid", graphId);
+            ins.Parameters.AddWithValue("$from", e.From);
+            ins.Parameters.AddWithValue("$to", e.To);
+            ins.Parameters.AddWithValue("$kind", e.Kind);
+            ins.Parameters.AddWithValue("$weight", (object?)e.Weight ?? DBNull.Value);
+            ins.ExecuteNonQuery();
+        }
+
+        tx.Commit();
     }
 
     public void AddNode(string graphId, Node node)
