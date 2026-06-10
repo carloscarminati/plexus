@@ -170,6 +170,12 @@ The decisive question — should reasoning structure be a *typed, validated grap
    - the relational/weighted edges — `addresses`, `supports`, `refutes`, `selects`, `cites` — carry data recoverable from no node field (notably the `supports`/`refutes` weights), so they **must persist and round-trip via SQLite**.
 
    Acceptance: a reasoning graph saved → reloaded is byte-identical — `grounds` re-derived from `source_ref`, the relational edges loaded from storage — with `ReasoningGraphValidator` yielding the same diagnostics before and after the round-trip.
+
+   **Status — engine + persistence landed; real grounding pending:**
+   - [x] **R2.0a — emission machinery.** Factored `JsonSchemaGen` (gen/validate, shared with the render catalog, behavior-neutral) + `SchemaConstrainedEmitter`: emit → validate structurally → bounded auto-fix → explicit error (never markdown). _(Landed: `f34ab46`.)_
+   - [x] **R2.0b — recipe engine.** Config-driven `RecipeExecutor` over the primitives; per-step cardinality + config bounds; referential-integrity + weight-range guards (no silent drop); an instrumented, iterable live smoke (`InvestigatorLiveSmoke`). _(Landed: `7a339ab`, `0473693`, `ff5339a`, `694a3ed`, `73eba8e`.)_
+   - [x] **R2.1 — relational-edge persistence.** Semantic edges (with weights) persist + round-trip via SQLite per the consistency model above; gate verified (a net-negative graph reloads with identical R1 diagnostics, which requires the weights to survive). _(Landed: `9a14865`.)_
+   - [ ] **R2.2 — real grounding + worked-examples.** RAG over a control/bowtie catalog + operational APIs for real `source_ref`s; validate on a real CMP/Collahuasi control investigation. Gate this on the live smoke first: if a small model doesn't reason soundly on a representative case (R1-sound across runs), real grounding won't fix it — that's a model/prompt/escalation problem, not a data one.
 4. [ ] **R3 — `evaluation` render.** Add the hypothesis × evidence matrix as a C1 catalog data shape (depends on C1).
 5. [ ] **R4 — Compose traversal.** Define the `conclusion`→`cites`→`grounds` traversal + limitations projection as the X1 compose contract (in the compose/export spec, consuming this graph).
 
