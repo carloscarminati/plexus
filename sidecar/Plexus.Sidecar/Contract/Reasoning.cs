@@ -18,6 +18,7 @@ public static class ReasoningRoles
     public const string Hypothesis = "hypothesis"; // candidate explanation
     public const string Evaluation = "evaluation"; // the weighing of facts against hypotheses
     public const string Conclusion = "conclusion"; // selected synthesis
+    public const string Source = "source";         // R2.2: a retrieved provenance node (grounds target); not a reasoning step
 }
 
 // Provenance kind for a `fact` node's source (ADR-0002: source_kind).

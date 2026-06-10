@@ -50,12 +50,21 @@ public static class RecipeExecutor
         string modelId,
         string? context = null, // the case/material under investigation, shared by every step
         string? escalateModelId = null, // stronger model to re-run the contested tail on an R1 flag
+        IFactSource? factSource = null, // R2.2: grounds facts in retrieved sources (null = ungrounded)
         Func<RecipeStep, Graph, CancellationToken, Task>? onDecisionSeam = null,
         int maxAttempts = 3,
         CancellationToken ct = default)
     {
         var state = new RunState();
         var reports = new List<StepReport>();
+
+        // R2.2 retrieval-step: pull sources for the case up front and add them as source
+        // nodes, so the facts step can ground each fact in a retrieved passage (cite its
+        // id) instead of inventing source_refs. Deterministic retrieval; the model only
+        // extracts + cites.
+        if (factSource is not null)
+            foreach (var passage in await factSource.RetrieveAsync(context ?? "", ct))
+                state.AddSourceNode(passage);
 
         foreach (var step in recipe.Steps)
         {
@@ -134,6 +143,17 @@ public static class RecipeExecutor
     {
         var head = string.IsNullOrWhiteSpace(context) ? "" : $"{context}\n\n";
 
+        // R2.2 grounding: the facts step lists the retrieved sources so the model sets
+        // each fact's sourceRef to a REAL source id (verifiable provenance), not invent it.
+        if (step.Role == ReasoningRoles.Fact && state.Sources.Count > 0)
+        {
+            var g = new StringBuilder(head + step.Prompt);
+            g.Append("\n\nGround each fact in one of these sources — set its sourceRef to the exact id:");
+            foreach (var (id, text) in state.Sources)
+                g.Append($"\n- {id}: {Truncate(text, 160)}");
+            return g.ToString();
+        }
+
         var prefixes = step.Role switch
         {
             ReasoningRoles.Hypothesis => new[] { "u" },
@@ -183,10 +203,32 @@ public static class RecipeExecutor
     // A real model sometimes references a ref that doesn't exist; rather than silently
     // drop the edge (which would hide the model's error and lose information — fatal in
     // an auditability tool), we feed it back to the auto-fix loop, then fail explicitly.
-    private static Func<JsonNode, IReadOnlyList<string>>? RefCheckFor(RecipeStep step, RunState state) =>
-        step.Role is ReasoningRoles.Hypothesis or ReasoningRoles.Evaluation or ReasoningRoles.Conclusion
+    private static Func<JsonNode, IReadOnlyList<string>>? RefCheckFor(RecipeStep step, RunState state)
+    {
+        // Grounding check (R2.2): a grounded facts step must cite a RETRIEVED source id —
+        // makes provenance verifiable, and is auto-fixable (re-prompt with the valid ids).
+        if (step.Role == ReasoningRoles.Fact && state.Sources.Count > 0)
+            return json => UngroundedFacts(json, state.SourceIds);
+
+        return step.Role is ReasoningRoles.Hypothesis or ReasoningRoles.Evaluation or ReasoningRoles.Conclusion
             ? json => UnresolvedRefs(step.Role, json, state.RefToId)
             : null;
+    }
+
+    private static IReadOnlyList<string> UngroundedFacts(JsonNode json, IReadOnlySet<string> sourceIds)
+    {
+        var bad = new List<string>();
+        foreach (var f in json["facts"]?.AsArray() ?? new JsonArray())
+        {
+            var sr = (string?)f?["sourceRef"];
+            if (string.IsNullOrEmpty(sr) || !sourceIds.Contains(sr))
+                bad.Add(string.IsNullOrEmpty(sr) ? "(empty)" : sr);
+        }
+        if (bad.Count == 0)
+            return Array.Empty<string>();
+        var valid = string.Join(", ", sourceIds.OrderBy(x => x, StringComparer.Ordinal));
+        return bad.Distinct().Select(sr => $"sourceRef '{sr}' is not a retrieved source (valid: {valid})").ToList();
+    }
 
     private static IReadOnlyList<string> UnresolvedRefs(string role, JsonNode json, IReadOnlyDictionary<string, string> refs)
     {
@@ -262,8 +304,17 @@ public static class RecipeExecutor
             case ReasoningRoles.Fact:
             {
                 foreach (var f in value["facts"]!.Deserialize<List<FactEmission>>(PlexusJson.Options)!)
-                    s.Bind(prefix, s.AddNode(ReasoningRoles.Fact, f.Claim,
-                        new ReasoningMeta { Role = ReasoningRoles.Fact, SourceKind = f.SourceKind, SourceRef = f.SourceRef }), f.Claim);
+                {
+                    // When grounded, the source kind is authoritative from the matched
+                    // source node (the model only cites the id), not the model's guess.
+                    var kind = s.SourceIds.Contains(f.SourceRef) ? s.SourceKindOf(f.SourceRef) : f.SourceKind;
+                    var fid = s.AddNode(ReasoningRoles.Fact, f.Claim,
+                        new ReasoningMeta { Role = ReasoningRoles.Fact, SourceKind = kind, SourceRef = f.SourceRef });
+                    s.Bind(prefix, fid, f.Claim);
+                    // Derive the grounds edge (fact → source) from a resolving source_ref.
+                    if (s.SourceIds.Contains(f.SourceRef))
+                        s.Graph.Edges.Add(new Edge { From = fid, To = f.SourceRef, Kind = ReasoningEdges.Grounds });
+                }
                 break;
             }
             case ReasoningRoles.Uncertainty:
@@ -323,9 +374,35 @@ public static class RecipeExecutor
         public Graph Graph { get; } = new() { Id = "recipe" };
         public Dictionary<string, string> RefToId { get; } = new(StringComparer.Ordinal);
         public List<(string Ref, string Prefix, string Text)> Refs { get; } = new();
+        // R2.2 retrieved sources: listed to the facts step (Sources) and used to verify a
+        // fact's source_ref resolves (SourceIds) + to set its authoritative kind.
+        public List<(string Id, string Text)> Sources { get; } = new();
+        public HashSet<string> SourceIds { get; } = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, string> _sourceKind = new(StringComparer.Ordinal);
         private readonly Dictionary<string, int> _roleCounters = new(StringComparer.Ordinal);
         private int _seq;
         private string? _frameId;
+
+        // Add a retrieved source as a provenance node whose id IS the passage id, so a
+        // fact's source_ref (the same id) derives the grounds edge and round-trips.
+        public void AddSourceNode(SourcePassage p)
+        {
+            Graph.Nodes.Add(new Node
+            {
+                Id = p.Id,
+                ParentId = null, // provenance aux node, not part of the reasoning chain
+                Role = "assistant",
+                CreatedAt = $"src-{p.Id}",
+                Blocks = new List<Block> { new MarkdownBlock { Text = p.Text } },
+                Raw = p.Text,
+                Reasoning = new ReasoningMeta { Role = ReasoningRoles.Source, SourceKind = p.Kind, SourceRef = p.Id },
+            });
+            Sources.Add((p.Id, p.Text));
+            SourceIds.Add(p.Id);
+            _sourceKind[p.Id] = p.Kind;
+        }
+
+        public string? SourceKindOf(string id) => _sourceKind.GetValueOrDefault(id);
 
         public string AddNode(string role, string text, ReasoningMeta reasoning)
         {

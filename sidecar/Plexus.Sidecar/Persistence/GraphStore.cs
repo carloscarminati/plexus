@@ -304,6 +304,17 @@ public sealed class GraphStore
                 });
         }
 
+        // Derive grounds edges (ADR-0002 R2.2): a fact grounds on the source node its
+        // source_ref names. grounds is NOT stored (it's recoverable from source_ref), so
+        // it's re-derived here — keeping the persisted set to the relational edges only.
+        var nodeIds = graph.Nodes.Select(n => n.Id).ToHashSet(StringComparer.Ordinal);
+        foreach (var fact in graph.Nodes.Where(n => n.Reasoning?.Role == Contract.ReasoningRoles.Fact))
+        {
+            var sref = fact.Reasoning?.SourceRef;
+            if (!string.IsNullOrEmpty(sref) && nodeIds.Contains(sref))
+                graph.Edges.Add(new Edge { From = fact.Id, To = sref, Kind = Contract.ReasoningEdges.Grounds });
+        }
+
         return graph;
     }
 
@@ -324,8 +335,8 @@ public sealed class GraphStore
 
         foreach (var e in edges)
         {
-            if (e.Kind is null)
-                continue; // structural — derived, not stored
+            if (e.Kind is null || e.Kind == Contract.ReasoningEdges.Grounds)
+                continue; // structural OR grounds — derived (from parentId / source_ref), not stored
             using var ins = conn.CreateCommand();
             ins.CommandText = "INSERT INTO edges (graph_id, from_id, to_id, kind, weight) VALUES ($gid, $from, $to, $kind, $weight);";
             ins.Parameters.AddWithValue("$gid", graphId);
