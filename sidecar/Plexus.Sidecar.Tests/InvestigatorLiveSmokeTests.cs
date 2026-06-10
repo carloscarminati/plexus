@@ -63,7 +63,7 @@ public class InvestigatorLiveSmokeTests
 
         var stepStructural = new Dictionary<string, List<int>>(StringComparer.Ordinal);
         var stepReferential = new Dictionary<string, List<int>>(StringComparer.Ordinal);
-        int okRuns = 0, soundRuns = 0;
+        int okRuns = 0, soundRuns = 0, openTotal = 0;
 
         for (var i = 1; i <= iterations; i++)
         {
@@ -80,9 +80,15 @@ public class InvestigatorLiveSmokeTests
                 continue;
             }
             var v = ReasoningGraphValidator.Validate(run.Graph);
-            var sound = run.Ok && !v.HasErrors && !v.HasFlags && v.Diagnostics.Count == 0 && v.OpenUncertainties.Count == 0;
+            // Soundness = no invariant VIOLATIONS (errors/flags/warns, all of which are
+            // Diagnostics). Open uncertainties are NOT a violation — invariant #4 is
+            // "must-not-drop": they're the surfaced "open questions / limitations" the
+            // deliverable lists. A disciplined analyst leaves genuine gaps open instead
+            // of fabricating resolution, so they're reported separately, not against sound.
+            var sound = run.Ok && v.Diagnostics.Count == 0;
             if (run.Ok) okRuns++;
             if (sound) soundRuns++;
+            openTotal += v.OpenUncertainties.Count;
 
             foreach (var s in run.Steps ?? Array.Empty<StepReport>())
             {
@@ -102,7 +108,8 @@ public class InvestigatorLiveSmokeTests
 
         // The thesis line: wiring (okRuns) vs soundness (soundRuns). A run wiring through
         // proves the scaffolding; R1-sound runs are the actual bet — read soundRuns/N.
-        Log($"── thesis: wired {okRuns}/{iterations} | R1-sound {soundRuns}/{iterations} ──");
+        Log($"── thesis: wired {okRuns}/{iterations} | R1-sound {soundRuns}/{iterations} (no invariant violations) "
+            + $"| open uncertainties surfaced {openTotal} total (limitations, not unsoundness) ──");
 
         // Gate only the wiring (the scaffolding must produce a graph at least once);
         // soundness is measured, not asserted (it's the stochastic thesis signal).
