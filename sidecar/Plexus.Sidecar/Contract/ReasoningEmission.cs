@@ -74,7 +74,7 @@ public static class ReasoningSchemas
 {
     // Singular emission (single-node steps).
     public static JsonSchema Fact { get; } = JsonSchemaGen.Compile(
-        JsonSchemaGen.ForType(typeof(FactEmission)),
+        RefinedItemSchema(typeof(FactEmission)),
         warmupSample: new JsonObject { ["claim"] = "w", ["sourceKind"] = "doc", ["sourceRef"] = "w" });
 
     // Bounded-array emission (multi-node steps): a `{ "<key>": [ … ] }` envelope.
@@ -98,18 +98,44 @@ public static class ReasoningSchemas
 
     private static JsonSchema BuildEvaluationSchema()
     {
-        var weighing = JsonSchemaGen.ForType(typeof(WeighingEmission));
-        var weight = weighing["properties"]!["weight"]!.AsObject();
-        weight["minimum"] = 0;
-        weight["maximum"] = 1;
-
         var node = new JsonObject
         {
             ["type"] = "object",
-            ["properties"] = new JsonObject { ["weighings"] = new JsonObject { ["type"] = "array", ["items"] = weighing } },
+            ["properties"] = new JsonObject
+            {
+                ["weighings"] = new JsonObject { ["type"] = "array", ["items"] = RefinedItemSchema(typeof(WeighingEmission)) },
+            },
             ["required"] = new JsonArray("weighings"),
         };
         return JsonSchemaGen.Compile(node, warmupSample: new JsonObject { ["weighings"] = new JsonArray(new JsonObject()) });
+    }
+
+    // Per-primitive STRUCTURAL refinements the exporter can't express from the C# type:
+    // closed vocabularies (a fact's source_kind, a weighing's stance) and the weight's
+    // [0,1] magnitude. These force a real model into the contract — an out-of-vocab value
+    // (e.g. stance "neutral") fails structurally and is re-prompted, instead of crashing
+    // assembly or being silently dropped.
+    internal static JsonObject RefinedItemSchema(Type itemType)
+    {
+        var node = JsonSchemaGen.ForType(itemType);
+        if (itemType == typeof(FactEmission))
+        {
+            SetEnum(node, "sourceKind", FactSources.Doc, FactSources.Api, FactSources.Given);
+        }
+        else if (itemType == typeof(WeighingEmission))
+        {
+            SetEnum(node, "stance", ReasoningEdges.Supports, ReasoningEdges.Refutes);
+            var weight = node["properties"]?["weight"]?.AsObject();
+            if (weight is not null) { weight["minimum"] = 0; weight["maximum"] = 1; }
+        }
+        return node;
+    }
+
+    private static void SetEnum(JsonObject node, string property, params string[] values)
+    {
+        var prop = node["properties"]?[property]?.AsObject();
+        if (prop is not null)
+            prop["enum"] = new JsonArray(values.Select(v => (JsonNode)v).ToArray());
     }
 
     // Build an object envelope whose single required property is a bounded array of
@@ -120,7 +146,7 @@ public static class ReasoningSchemas
         var array = new JsonObject
         {
             ["type"] = "array",
-            ["items"] = JsonSchemaGen.ForType(itemType),
+            ["items"] = RefinedItemSchema(itemType),
             ["minItems"] = minItems,
         };
         if (maxItems is int max)

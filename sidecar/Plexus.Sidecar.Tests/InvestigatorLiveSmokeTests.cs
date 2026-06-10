@@ -56,7 +56,18 @@ public class InvestigatorLiveSmokeTests
 
         for (var i = 1; i <= iterations; i++)
         {
-            var run = await RecipeExecutor.RunAsync(client, Recipes.Investigator, model, context: CaseText, maxAttempts: 4);
+            RecipeRunResult run;
+            try
+            {
+                run = await RecipeExecutor.RunAsync(client, Recipes.Investigator, model, context: CaseText, maxAttempts: 4);
+            }
+            catch (Exception ex)
+            {
+                // A run that throws is a real defect surfaced by real output — record it
+                // and keep going so one bad run doesn't lose the whole distribution.
+                Log($"run {i,2}/{iterations}: CRASHED — {ex.GetType().Name}: {ex.Message}");
+                continue;
+            }
             var v = ReasoningGraphValidator.Validate(run.Graph);
             var sound = run.Ok && !v.HasErrors && !v.HasFlags && v.Diagnostics.Count == 0 && v.OpenUncertainties.Count == 0;
             if (run.Ok) okRuns++;

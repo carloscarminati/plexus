@@ -72,4 +72,21 @@ public class RecipeRobustnessTests
         Assert.False(JsonSchemaGen.Validate(ReasoningSchemas.Evaluation, Eval("-0.3"), out _));
         Assert.True(JsonSchemaGen.Validate(ReasoningSchemas.Evaluation, Eval("0.8"), out _));
     }
+
+    // Guard #3 (surfaced by the live smoke): an out-of-vocabulary stance ("neutral") or
+    // source_kind ("database") is rejected structurally — so the auto-fix loop re-prompts
+    // instead of the executor crashing on an unknown enum value.
+    [Fact]
+    public void OutOfVocabulary_StanceAndSourceKind_RejectedStructurally()
+    {
+        Assert.False(JsonSchemaGen.Validate(ReasoningSchemas.Evaluation,
+            JsonNode.Parse("""{"weighings":[{"fact":"f0","hypothesis":"h0","stance":"neutral","weight":0.5}]}"""), out _));
+        Assert.False(JsonSchemaGen.Validate(ReasoningSchemas.Facts,
+            JsonNode.Parse("""{"facts":[{"claim":"x","sourceKind":"database","sourceRef":"r"}]}"""), out _));
+
+        Assert.True(JsonSchemaGen.Validate(ReasoningSchemas.Evaluation,
+            JsonNode.Parse("""{"weighings":[{"fact":"f0","hypothesis":"h0","stance":"refutes","weight":0.5}]}"""), out _));
+        Assert.True(JsonSchemaGen.Validate(ReasoningSchemas.Facts,
+            JsonNode.Parse("""{"facts":[{"claim":"x","sourceKind":"doc","sourceRef":"r"}]}"""), out _));
+    }
 }
