@@ -34,6 +34,12 @@ public static class SchemaConstrainedEmitter
         JsonSchema schema,
         int maxAttempts = 3,
         ChatResponseFormat? responseFormat = null, // opt-in constrained decoding; loop never depends on it
+        // Optional check run AFTER structural validation, for constraints the schema
+        // can't express (e.g. referential integrity of emitted refs — a layer distinct
+        // from both schema-structure and R1 reasoning-soundness). Its errors feed the
+        // SAME bounded re-prompt loop — so a real model's bad ref is corrected, or
+        // surfaced explicitly on exhaustion. Never silently dropped downstream.
+        Func<JsonNode, IReadOnlyList<string>>? postStructuralCheck = null,
         CancellationToken ct = default)
     {
         var messages = new List<ChatMessage> { new(ChatRole.User, instruction) };
@@ -47,17 +53,22 @@ public static class SchemaConstrainedEmitter
 
             if (json is null)
                 lastErrors = new[] { "output was not valid JSON" };
-            else if (JsonSchemaGen.Validate(schema, json, out var errors))
-                return new SchemaEmissionResult(true, json, attempt, Array.Empty<string>(), null);
-            else
+            else if (!JsonSchemaGen.Validate(schema, json, out var errors))
                 lastErrors = errors;
+            else
+            {
+                var checkErrors = postStructuralCheck?.Invoke(json) ?? Array.Empty<string>();
+                if (checkErrors.Count == 0)
+                    return new SchemaEmissionResult(true, json, attempt, Array.Empty<string>(), null);
+                lastErrors = checkErrors;
+            }
 
             // Auto-fix: echo the bad turn and feed the errors back for a correction.
             messages.AddRange(response.Messages);
             messages.Add(new ChatMessage(ChatRole.User,
-                "Your previous reply did not satisfy the required JSON schema:\n- "
+                "Your previous reply was rejected:\n- "
                 + string.Join("\n- ", lastErrors)
-                + "\nReturn ONLY corrected JSON that satisfies the schema."));
+                + "\nReturn ONLY corrected JSON that satisfies all the requirements."));
         }
 
         return new SchemaEmissionResult(

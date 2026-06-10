@@ -82,6 +82,36 @@ public static class ReasoningSchemas
     public static JsonSchema Hypotheses { get; } = BoundedArrayEnvelope("hypotheses", typeof(HypothesisEmission), minItems: 2, maxItems: 6);
     public static JsonSchema Uncertainties { get; } = BoundedArrayEnvelope("uncertainties", typeof(UncertaintyEmission), minItems: 1);
 
+    // Singular emission (single-node steps).
+    public static JsonSchema Frame { get; } = JsonSchemaGen.Compile(
+        JsonSchemaGen.ForType(typeof(FrameEmission)), warmupSample: new JsonObject { ["question"] = "w" });
+
+    public static JsonSchema Conclusion { get; } = JsonSchemaGen.Compile(
+        JsonSchemaGen.ForType(typeof(ConclusionEmission)),
+        warmupSample: new JsonObject { ["selects"] = "w", ["cites"] = new JsonArray("w") });
+
+    // Evaluation bounds each weighing's weight to [0,1]: a runaway weight (1.5, -0.3)
+    // would corrupt the net-evidence sum the R1 contrast invariant computes, so it's a
+    // cheap STRUCTURAL guard (unlike the array bounds, the [0,1] range is intrinsic to a
+    // magnitude, not a per-recipe knob, so it lives in the schema, not the step config).
+    public static JsonSchema Evaluation { get; } = BuildEvaluationSchema();
+
+    private static JsonSchema BuildEvaluationSchema()
+    {
+        var weighing = JsonSchemaGen.ForType(typeof(WeighingEmission));
+        var weight = weighing["properties"]!["weight"]!.AsObject();
+        weight["minimum"] = 0;
+        weight["maximum"] = 1;
+
+        var node = new JsonObject
+        {
+            ["type"] = "object",
+            ["properties"] = new JsonObject { ["weighings"] = new JsonObject { ["type"] = "array", ["items"] = weighing } },
+            ["required"] = new JsonArray("weighings"),
+        };
+        return JsonSchemaGen.Compile(node, warmupSample: new JsonObject { ["weighings"] = new JsonArray(new JsonObject()) });
+    }
+
     // Build an object envelope whose single required property is a bounded array of
     // `itemType`. The recipe step config supplies (key, itemType, bounds); the emitter
     // validates/auto-fixes the whole collection against it.

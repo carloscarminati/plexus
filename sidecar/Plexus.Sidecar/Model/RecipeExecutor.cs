@@ -36,7 +36,8 @@ public static class RecipeExecutor
         {
             var schema = SchemaForStep(step);
             var result = await SchemaConstrainedEmitter.EmitAsync(
-                client, modelId, step.Prompt, schema, maxAttempts, ct: ct);
+                client, modelId, step.Prompt, schema, maxAttempts,
+                postStructuralCheck: RefCheckFor(step, state), ct: ct);
 
             // A structured emission that never validates must surface explicitly — it
             // can NOT degrade to free text without breaking the typed-graph contract.
@@ -52,15 +53,71 @@ public static class RecipeExecutor
         return new RecipeRunResult(true, state.Graph);
     }
 
-    // Per-step schema, built from the step config. Array steps get a bounded envelope
-    // with the step's own min/max (config, not a constant); single steps get the
-    // primitive's object schema.
+    // Per-step schema. Array steps get a bounded envelope with the step's own min/max
+    // (config, not a constant); single steps get the primitive's object schema
+    // (Evaluation's bounds the weight to [0,1]).
     private static JsonSchema SchemaForStep(RecipeStep step)
     {
-        var (itemType, key) = PrimitiveFor(step.Role);
-        return step.Array
-            ? ReasoningSchemas.BoundedArrayEnvelope(key, itemType, step.MinItems, step.MaxItems)
-            : JsonSchemaGen.Compile(JsonSchemaGen.ForType(itemType));
+        if (step.Array)
+        {
+            var (itemType, key) = PrimitiveFor(step.Role);
+            return ReasoningSchemas.BoundedArrayEnvelope(key, itemType, step.MinItems, step.MaxItems);
+        }
+        return step.Role switch
+        {
+            ReasoningRoles.Frame => ReasoningSchemas.Frame,
+            ReasoningRoles.Evaluation => ReasoningSchemas.Evaluation,
+            ReasoningRoles.Conclusion => ReasoningSchemas.Conclusion,
+            _ => throw new ArgumentException($"No single-node schema for role '{step.Role}'", nameof(step)),
+        };
+    }
+
+    // Referential integrity (run inside the emission loop, after structural validation):
+    // every ref a step emits (hypothesis→uncertainty, weighing→fact/hypothesis,
+    // conclusion→hypothesis/facts) must resolve to a node created by an earlier step.
+    // A real model sometimes references a ref that doesn't exist; rather than silently
+    // drop the edge (which would hide the model's error and lose information — fatal in
+    // an auditability tool), we feed it back to the auto-fix loop, then fail explicitly.
+    private static Func<JsonNode, IReadOnlyList<string>>? RefCheckFor(RecipeStep step, RunState state) =>
+        step.Role is ReasoningRoles.Hypothesis or ReasoningRoles.Evaluation or ReasoningRoles.Conclusion
+            ? json => UnresolvedRefs(step.Role, json, state.RefToId)
+            : null;
+
+    private static IReadOnlyList<string> UnresolvedRefs(string role, JsonNode json, IReadOnlyDictionary<string, string> refs)
+    {
+        var bad = new List<string>();
+        void Check(string? r)
+        {
+            if (!string.IsNullOrEmpty(r) && !refs.ContainsKey(r))
+                bad.Add(r);
+        }
+
+        switch (role)
+        {
+            case ReasoningRoles.Hypothesis:
+                foreach (var h in json["hypotheses"]?.AsArray() ?? new JsonArray())
+                    foreach (var a in h?["addresses"]?.AsArray() ?? new JsonArray())
+                        Check((string?)a);
+                break;
+            case ReasoningRoles.Evaluation:
+                foreach (var w in json["weighings"]?.AsArray() ?? new JsonArray())
+                {
+                    Check((string?)w?["fact"]);
+                    Check((string?)w?["hypothesis"]);
+                }
+                break;
+            case ReasoningRoles.Conclusion:
+                Check((string?)json["selects"]);
+                foreach (var c in json["cites"]?.AsArray() ?? new JsonArray())
+                    Check((string?)c);
+                break;
+        }
+
+        if (bad.Count == 0)
+            return Array.Empty<string>();
+
+        var valid = refs.Count == 0 ? "(none yet)" : string.Join(", ", refs.Keys.OrderBy(k => k, StringComparer.Ordinal));
+        return bad.Distinct().Select(r => $"reference '{r}' does not exist (valid refs: {valid})").ToList();
     }
 
     private static (Type ItemType, string ArrayKey) PrimitiveFor(string role) => role switch
