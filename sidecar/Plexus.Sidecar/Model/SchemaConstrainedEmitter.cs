@@ -23,7 +23,12 @@ public sealed record SchemaEmissionResult(
     JsonNode? Value,
     int Attempts,
     IReadOnlyList<string> Errors,
-    string? Error);
+    string? Error,
+    // Instrumentation (ADR-0002 R2.0b smoke): how many attempts failed each way. The
+    // two are counted separately because they say different things about the model tier
+    // — structural = "didn't match the shape", referential = "invented a bad ref".
+    int StructuralFailures = 0,
+    int PostStructuralFailures = 0);
 
 public static class SchemaConstrainedEmitter
 {
@@ -45,6 +50,7 @@ public static class SchemaConstrainedEmitter
         var messages = new List<ChatMessage> { new(ChatRole.User, instruction) };
         var options = new ChatOptions { ModelId = modelId, ResponseFormat = responseFormat };
         IReadOnlyList<string> lastErrors = new[] { "no attempt made" };
+        int structuralFailures = 0, postStructuralFailures = 0;
 
         for (var attempt = 1; attempt <= maxAttempts; attempt++)
         {
@@ -52,15 +58,23 @@ public static class SchemaConstrainedEmitter
             var json = ExtractJsonObject(response.Text ?? string.Empty);
 
             if (json is null)
+            {
                 lastErrors = new[] { "output was not valid JSON" };
+                structuralFailures++;
+            }
             else if (!JsonSchemaGen.Validate(schema, json, out var errors))
+            {
                 lastErrors = errors;
+                structuralFailures++;
+            }
             else
             {
                 var checkErrors = postStructuralCheck?.Invoke(json) ?? Array.Empty<string>();
                 if (checkErrors.Count == 0)
-                    return new SchemaEmissionResult(true, json, attempt, Array.Empty<string>(), null);
+                    return new SchemaEmissionResult(true, json, attempt, Array.Empty<string>(), null,
+                        structuralFailures, postStructuralFailures);
                 lastErrors = checkErrors;
+                postStructuralFailures++;
             }
 
             // Auto-fix: echo the bad turn and feed the errors back for a correction.
@@ -73,7 +87,8 @@ public static class SchemaConstrainedEmitter
 
         return new SchemaEmissionResult(
             false, null, maxAttempts, lastErrors,
-            $"Emission did not satisfy the schema after {maxAttempts} attempt(s).");
+            $"Emission did not satisfy the schema after {maxAttempts} attempt(s).",
+            structuralFailures, postStructuralFailures);
     }
 
     // Tolerant extraction of the outermost JSON object: strip a ```json fence if one

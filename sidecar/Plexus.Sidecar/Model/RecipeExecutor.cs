@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Json.Schema;
@@ -18,7 +19,24 @@ namespace Plexus.Sidecar.Model;
 // (the R1 decision), so a reloaded fact stays grounded with no grounds edge stored.
 // Decision seams fire an optional callback (auto-resolved when none is supplied; the
 // interactive UI is M1).
-public sealed record RecipeRunResult(bool Ok, Graph Graph, string? Error = null, string? FailedStepId = null);
+public sealed record RecipeRunResult(
+    bool Ok,
+    Graph Graph,
+    string? Error = null,
+    string? FailedStepId = null,
+    IReadOnlyList<StepReport>? Steps = null);
+
+// Per-step instrumentation for the live smoke: how many auto-fix retries each step
+// needed, split by failure kind (structural shape vs referential bad-ref), and whether
+// it exhausted. This is what tells whether the small-model thesis holds — which steps
+// to escalate by default, which prompts/bounds to tune — not just pass/fail.
+public sealed record StepReport(
+    string StepId,
+    string Role,
+    bool Ok,
+    int Attempts,
+    int StructuralFailures,
+    int ReferentialFailures);
 
 public static class RecipeExecutor
 {
@@ -26,23 +44,29 @@ public static class RecipeExecutor
         IChatClient client,
         Recipe recipe,
         string modelId,
+        string? context = null, // the case/material under investigation, shared by every step
         Func<RecipeStep, Graph, CancellationToken, Task>? onDecisionSeam = null,
         int maxAttempts = 3,
         CancellationToken ct = default)
     {
         var state = new RunState();
+        var reports = new List<StepReport>();
 
         foreach (var step in recipe.Steps)
         {
             var schema = SchemaForStep(step);
+            var instruction = BuildInstruction(step, state, context);
             var result = await SchemaConstrainedEmitter.EmitAsync(
-                client, modelId, step.Prompt, schema, maxAttempts,
+                client, modelId, instruction, schema, maxAttempts,
                 postStructuralCheck: RefCheckFor(step, state), ct: ct);
+
+            reports.Add(new StepReport(step.Id, step.Role, result.Ok, result.Attempts,
+                result.StructuralFailures, result.PostStructuralFailures));
 
             // A structured emission that never validates must surface explicitly — it
             // can NOT degrade to free text without breaking the typed-graph contract.
             if (!result.Ok || result.Value is null)
-                return new RecipeRunResult(false, state.Graph, result.Error ?? "emission failed", step.Id);
+                return new RecipeRunResult(false, state.Graph, result.Error ?? "emission failed", step.Id, reports);
 
             ApplyStep(step, result.Value, state);
 
@@ -50,8 +74,39 @@ public static class RecipeExecutor
                 await onDecisionSeam(step, state.Graph, ct);
         }
 
-        return new RecipeRunResult(true, state.Graph);
+        return new RecipeRunResult(true, state.Graph, Steps: reports);
     }
+
+    // The model instruction = the step's (config) prompt + the dynamic ref context a
+    // ref-carrying step needs (the available facts/hypotheses/uncertainties, by id), so
+    // the model can reference real refs instead of inventing them.
+    private static string BuildInstruction(RecipeStep step, RunState state, string? context)
+    {
+        var head = string.IsNullOrWhiteSpace(context) ? "" : $"{context}\n\n";
+
+        var prefixes = step.Role switch
+        {
+            ReasoningRoles.Hypothesis => new[] { "u" },
+            ReasoningRoles.Evaluation => new[] { "f", "h" },
+            ReasoningRoles.Conclusion => new[] { "h", "f" },
+            _ => Array.Empty<string>(),
+        };
+        if (prefixes.Length == 0)
+            return head + step.Prompt;
+
+        var sb = new StringBuilder(head + step.Prompt);
+        sb.Append("\n\nReference these by their exact id:");
+        var any = false;
+        foreach (var p in prefixes)
+            foreach (var (rf, _, text) in state.Refs.Where(r => r.Prefix == p))
+            {
+                sb.Append($"\n- {rf}: {Truncate(text, 120)}");
+                any = true;
+            }
+        return any ? sb.ToString() : step.Prompt;
+    }
+
+    private static string Truncate(string s, int max) => s.Length <= max ? s : s[..max] + "…";
 
     // Per-step schema. Array steps get a bounded envelope with the step's own min/max
     // (config, not a constant); single steps get the primitive's object schema
@@ -151,20 +206,20 @@ public static class RecipeExecutor
             {
                 var fe = value.Deserialize<FrameEmission>(PlexusJson.Options)!;
                 var text = fe.Scope is null ? fe.Question : $"{fe.Question}\n\n_Scope:_ {fe.Scope}";
-                s.Bind(prefix, s.AddNode(ReasoningRoles.Frame, text, new ReasoningMeta { Role = ReasoningRoles.Frame }));
+                s.Bind(prefix, s.AddNode(ReasoningRoles.Frame, text, new ReasoningMeta { Role = ReasoningRoles.Frame }), text);
                 break;
             }
             case ReasoningRoles.Fact:
             {
                 foreach (var f in value["facts"]!.Deserialize<List<FactEmission>>(PlexusJson.Options)!)
                     s.Bind(prefix, s.AddNode(ReasoningRoles.Fact, f.Claim,
-                        new ReasoningMeta { Role = ReasoningRoles.Fact, SourceKind = f.SourceKind, SourceRef = f.SourceRef }));
+                        new ReasoningMeta { Role = ReasoningRoles.Fact, SourceKind = f.SourceKind, SourceRef = f.SourceRef }), f.Claim);
                 break;
             }
             case ReasoningRoles.Uncertainty:
             {
                 foreach (var u in value["uncertainties"]!.Deserialize<List<UncertaintyEmission>>(PlexusJson.Options)!)
-                    s.Bind(prefix, s.AddNode(ReasoningRoles.Uncertainty, u.Question, new ReasoningMeta { Role = ReasoningRoles.Uncertainty }));
+                    s.Bind(prefix, s.AddNode(ReasoningRoles.Uncertainty, u.Question, new ReasoningMeta { Role = ReasoningRoles.Uncertainty }), u.Question);
                 break;
             }
             case ReasoningRoles.Hypothesis:
@@ -172,7 +227,7 @@ public static class RecipeExecutor
                 foreach (var h in value["hypotheses"]!.Deserialize<List<HypothesisEmission>>(PlexusJson.Options)!)
                 {
                     var hid = s.AddNode(ReasoningRoles.Hypothesis, h.Statement, new ReasoningMeta { Role = ReasoningRoles.Hypothesis });
-                    s.Bind(prefix, hid);
+                    s.Bind(prefix, hid, h.Statement);
                     foreach (var uref in h.Addresses ?? Enumerable.Empty<string>())
                         if (s.RefToId.TryGetValue(uref, out var uid))
                             s.Graph.Edges.Add(new Edge { From = hid, To = uid, Kind = ReasoningEdges.Addresses });
@@ -182,7 +237,7 @@ public static class RecipeExecutor
             case ReasoningRoles.Evaluation:
             {
                 var ev = value.Deserialize<EvaluationEmission>(PlexusJson.Options)!;
-                s.Bind(prefix, s.AddNode(ReasoningRoles.Evaluation, "Evaluation", new ReasoningMeta { Role = ReasoningRoles.Evaluation }));
+                s.Bind(prefix, s.AddNode(ReasoningRoles.Evaluation, "Evaluation", new ReasoningMeta { Role = ReasoningRoles.Evaluation }), "Evaluation");
                 foreach (var w in ev.Weighings)
                     if (s.RefToId.TryGetValue(w.Fact, out var fid) && s.RefToId.TryGetValue(w.Hypothesis, out var hid))
                         s.Graph.Edges.Add(new Edge { From = fid, To = hid, Kind = EdgeKindForStance(w.Stance), Weight = w.Weight });
@@ -192,7 +247,7 @@ public static class RecipeExecutor
             {
                 var c = value.Deserialize<ConclusionEmission>(PlexusJson.Options)!;
                 var cid = s.AddNode(ReasoningRoles.Conclusion, c.Summary ?? "Conclusion", new ReasoningMeta { Role = ReasoningRoles.Conclusion });
-                s.Bind(prefix, cid);
+                s.Bind(prefix, cid, c.Summary ?? "Conclusion");
                 if (s.RefToId.TryGetValue(c.Selects, out var selId))
                     s.Graph.Edges.Add(new Edge { From = cid, To = selId, Kind = ReasoningEdges.Selects });
                 foreach (var cite in c.Cites)
@@ -211,11 +266,13 @@ public static class RecipeExecutor
     };
 
     // Mutable run state: the graph under construction, the ref→node-id map the later
-    // steps resolve against, and per-role ref counters (f0, h1, …).
+    // steps resolve against, and the ordered refs (with prefix + text) the prompt
+    // builder lists back to the model.
     private sealed class RunState
     {
         public Graph Graph { get; } = new() { Id = "recipe" };
         public Dictionary<string, string> RefToId { get; } = new(StringComparer.Ordinal);
+        public List<(string Ref, string Prefix, string Text)> Refs { get; } = new();
         private readonly Dictionary<string, int> _roleCounters = new(StringComparer.Ordinal);
         private int _seq;
         private string? _frameId;
@@ -241,12 +298,15 @@ public static class RecipeExecutor
             return id;
         }
 
-        // Assign the next per-role ref (f0, f1, …) to a freshly created node id.
-        public void Bind(string prefix, string nodeId)
+        // Assign the next per-prefix ref (f0, f1, …) to a freshly created node, recording
+        // its text so a later step's prompt can list it.
+        public void Bind(string prefix, string nodeId, string text)
         {
             var n = _roleCounters.TryGetValue(prefix, out var c) ? c : 0;
             _roleCounters[prefix] = n + 1;
-            RefToId[$"{prefix}{n}"] = nodeId;
+            var rf = $"{prefix}{n}";
+            RefToId[rf] = nodeId;
+            Refs.Add((rf, prefix, text));
         }
     }
 }

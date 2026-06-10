@@ -41,17 +41,18 @@ public static class Recipes
         Label = "Expert investigator",
         Steps = new()
         {
-            new() { Id = "frame", Role = ReasoningRoles.Frame, Prompt = "State the case: question, scope, constraints." },
+            new() { Id = "frame", Role = ReasoningRoles.Frame,
+                    Prompt = "State the case: question, scope, constraints.\nReply as JSON: {\"question\":\"…\",\"scope\":\"…\"}" },
             new() { Id = "facts", Role = ReasoningRoles.Fact, Array = true, MinItems = 1,
-                    Prompt = "Extract the atomic facts, each with its source." },
+                    Prompt = "Extract the atomic facts, each with its source.\nReply as JSON: {\"facts\":[{\"claim\":\"…\",\"sourceKind\":\"doc|api|given\",\"sourceRef\":\"…\"}]}" },
             new() { Id = "uncertainties", Role = ReasoningRoles.Uncertainty, Array = true, MinItems = 1,
-                    Prompt = "List the gaps / unknowns." },
+                    Prompt = "List the gaps / unknowns.\nReply as JSON: {\"uncertainties\":[{\"question\":\"…\"}]}" },
             new() { Id = "hypotheses", Role = ReasoningRoles.Hypothesis, Array = true, MinItems = 2, MaxItems = 6,
-                    Prompt = "Propose candidate explanations that cover the plausible space.", DecisionSeam = true },
+                    Prompt = "Propose 2–6 candidate explanations covering the plausible space, each addressing an uncertainty.\nReply as JSON: {\"hypotheses\":[{\"statement\":\"…\",\"addresses\":[\"u0\"]}]}", DecisionSeam = true },
             new() { Id = "evaluation", Role = ReasoningRoles.Evaluation,
-                    Prompt = "Weigh the facts for/against each hypothesis.", DecisionSeam = true },
+                    Prompt = "Weigh the facts for/against each hypothesis (weight 0–1 magnitude).\nReply as JSON: {\"weighings\":[{\"fact\":\"f0\",\"hypothesis\":\"h0\",\"stance\":\"supports|refutes\",\"weight\":0.0}]}", DecisionSeam = true },
             new() { Id = "conclusion", Role = ReasoningRoles.Conclusion,
-                    Prompt = "Select the best-supported hypothesis and cite the facts." },
+                    Prompt = "Select the best-supported hypothesis and cite the facts.\nReply as JSON: {\"selects\":\"h0\",\"cites\":[\"f0\"],\"summary\":\"…\"}" },
         },
     };
 }
