@@ -105,25 +105,12 @@ public static class BlockCatalog
     // JsonSchemaExporter (.NET 9). Each branch is pinned to its discriminator.
     public static JsonNode SchemaNode { get; } = BuildSchemaNode();
 
-    private static readonly JsonSchema _schema = JsonSchema.FromText(SchemaNode.ToJsonString());
-
-    // JsonSchema.Net builds its internal evaluation state lazily on the FIRST
-    // Evaluate call, and that build is not thread-safe: two threads hitting an
-    // un-warmed schema concurrently (e.g. parallel xUnit classes, or two turns
-    // landing at once) can race and produce a wrong result — an unknown block
-    // type silently validating. Force the build once here. Static initialization
-    // is serialized by the CLR, so every later Evaluate is read-only and safe.
-    private static readonly bool _schemaWarmed = WarmUpSchema();
-
-    private static bool WarmUpSchema()
-    {
-        // Must be a NON-EMPTY array so the per-item `anyOf` branch constraints are
-        // built too — an empty array never descends into `items`, leaving the branch
-        // schemas (and the discriminator checks) un-warmed and still racy.
-        var sample = new JsonArray(new JsonObject { ["type"] = "markdown", ["text"] = "warmup" });
-        _schema.Evaluate(sample, new EvaluationOptions { OutputFormat = OutputFormat.List });
-        return true;
-    }
+    // Compile via the shared helper (ADR-0002 R2.0a). The warmup sample is NON-EMPTY
+    // so the per-item `anyOf` branch constraints are built too — an empty array never
+    // descends into `items`, leaving the branch/discriminator checks un-warmed and
+    // racy under concurrent first-evaluation.
+    private static readonly JsonSchema _schema = JsonSchemaGen.Compile(
+        SchemaNode, warmupSample: new JsonArray(new JsonObject { ["type"] = "markdown", ["text"] = "warmup" }));
 
     // Discriminator names actually present in the generated schema (for tests).
     public static IReadOnlyList<string> SchemaTypeNames { get; } =
@@ -133,13 +120,10 @@ public static class BlockCatalog
 
     private static JsonNode BuildSchemaNode()
     {
-        // Exporter needs an explicit resolver; clone our conventions (camelCase, etc.).
-        var exportOpts = new JsonSerializerOptions(PlexusJson.Options) { TypeInfoResolver = new DefaultJsonTypeInfoResolver() };
-
         var branches = new JsonArray();
         foreach (var e in Entries)
         {
-            var node = exportOpts.GetJsonSchemaAsNode(e.PayloadType).AsObject();
+            var node = JsonSchemaGen.ForType(e.PayloadType);
 
             var props = node["properties"]?.AsObject() ?? new JsonObject();
             props["type"] = new JsonObject { ["const"] = e.TypeName }; // pin the discriminator
@@ -165,16 +149,8 @@ public static class BlockCatalog
     // Validate a blocks array (the value of `blocks`) against the generated schema.
     public static bool ValidateBlocksArray(JsonNode? blocksArray, out IReadOnlyList<string> errors)
     {
-        var result = _schema.Evaluate(blocksArray, new EvaluationOptions { OutputFormat = OutputFormat.List });
-        if (!result.IsValid)
-        {
-            errors = result.Details
-                .Where(d => d.HasErrors)
-                .SelectMany(d => d.Errors!.Values.Select(v => $"{d.InstanceLocation}: {v}"))
-                .DefaultIfEmpty("schema validation failed")
-                .ToList();
+        if (!JsonSchemaGen.Validate(_schema, blocksArray, out errors))
             return false;
-        }
 
         // Post-schema semantic checks the JSON Schema can't express (e.g. a chart
         // encoding field must exist in the data records). Catalog-owned per entry.
