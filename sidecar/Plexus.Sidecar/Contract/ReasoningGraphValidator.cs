@@ -13,7 +13,7 @@ public static class ReasoningSeverity
 {
     public const string Error = "error"; // invalid: must be fixed (provenance)
     public const string Flag = "flag";   // contested: surface for escalate (net-negative selection)
-    public const string Warn = "warn";   // suspicious: dangling hypothesis
+    public const string Warn = "warn";   // suspicious: dangling hypothesis, unweighed citation
 }
 
 // Diagnostic codes — stable identifiers for each invariant.
@@ -22,6 +22,7 @@ public static class ReasoningDiagnosticCodes
     public const string FactNoProvenance = "fact_no_provenance";
     public const string ConclusionNetNegative = "conclusion_net_negative";
     public const string HypothesisDangling = "hypothesis_dangling";
+    public const string CitationNotWeighed = "citation_not_weighed";
 }
 
 // One finding, tagged with severity, a stable code, and the offending node (and/or
@@ -72,6 +73,7 @@ public static class ReasoningGraphValidator
                     break;
                 case ReasoningRoles.Conclusion:
                     CheckSelectedNetEvidence(node, edges, result);
+                    CheckCitationsWeighed(node, edges, result);
                     break;
             }
         }
@@ -129,6 +131,29 @@ public static class ReasoningGraphValidator
                 ReasoningSeverity.Warn, ReasoningDiagnosticCodes.HypothesisDangling,
                 $"Hypothesis '{hypothesis.Id}' addresses no uncertainty and has no supporting/refuting evidence.",
                 NodeId: hypothesis.Id));
+    }
+
+    // Invariant 5 (warn): a fact the conclusion `cites` but that weighs on no hypothesis
+    // (no outgoing supports/refutes edge) never participated in the evaluation — the
+    // conclusion leans on it without the reasoning having tested it. This catches the
+    // citation/selection coherence gap WITHOUT penalising legitimate breadth: a cited
+    // fact that refutes a RIVAL (discriminating evidence) or refutes the SELECTED one
+    // (acknowledged counter-evidence) DID weigh, so it passes — only an evaluation-less
+    // citation warns. Warn tier (same as dangling-hypothesis): surfaced, never a hard fail.
+    private static void CheckCitationsWeighed(Node conclusion, List<Edge> edges, ReasoningValidationResult result)
+    {
+        foreach (var cite in edges.Where(e => e.Kind == ReasoningEdges.Cites && e.From == conclusion.Id))
+        {
+            var factId = cite.To;
+            var weighed = edges.Any(e =>
+                e.From == factId && (e.Kind == ReasoningEdges.Supports || e.Kind == ReasoningEdges.Refutes));
+
+            if (!weighed)
+                result.Diagnostics.Add(new ReasoningDiagnostic(
+                    ReasoningSeverity.Warn, ReasoningDiagnosticCodes.CitationNotWeighed,
+                    $"Conclusion '{conclusion.Id}' cites fact '{factId}', which weighs on no hypothesis (no supports/refutes edge).",
+                    NodeId: factId, EdgeFrom: conclusion.Id, EdgeTo: factId));
+        }
     }
 
     // Invariant 4 (must-not-drop): an uncertainty with no resolving `addresses` is

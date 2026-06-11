@@ -160,6 +160,76 @@ public class ReasoningGraphValidatorTests
         Assert.Empty(r.Diagnostics); // surfaced, not an error/warn
     }
 
+    // ── negative control 5: citation that weighs on nothing (warn) ──────────
+    // A conclusion cites a fact that never weighed on any hypothesis (no supports/
+    // refutes edge) → the conclusion leans on untested evidence → warn, naming the fact.
+    [Fact]
+    public void ConclusionCitesUnweighedFact_RaisesCitationWarn()
+    {
+        var nodes = new[] { R("f1", ReasoningRoles.Fact, FactSources.Doc, "doc://1"), R("c", ReasoningRoles.Conclusion) };
+        var edges = new[] { E("c", "f1", ReasoningEdges.Cites) }; // f1 weighs on no hypothesis
+
+        var r = ReasoningGraphValidator.Validate(G(nodes, edges));
+
+        var d = Assert.Single(r.Diagnostics);
+        Assert.Equal(ReasoningSeverity.Warn, d.Severity);
+        Assert.Equal(ReasoningDiagnosticCodes.CitationNotWeighed, d.Code);
+        Assert.Equal("f1", d.NodeId);       // names the fact, so the render is actionable
+        Assert.False(r.HasErrors);
+        Assert.False(r.HasFlags);           // warn tier — does not fail the step
+    }
+
+    // Acceptance (a) — discriminating evidence: a cited fact that REFUTES A RIVAL
+    // hypothesis weighed on the evaluation → no warn. This is the difference against a
+    // strict cite⊆support subset: legitimate breadth (ruling a rival out) must pass.
+    [Fact]
+    public void ConclusionCitesFactRefutingRival_DoesNotWarn()
+    {
+        var nodes = new[]
+        {
+            R("f1", ReasoningRoles.Fact, FactSources.Doc, "doc://1"),
+            R("hr", ReasoningRoles.Hypothesis), // the rival
+            R("c", ReasoningRoles.Conclusion),
+        };
+        var edges = new[]
+        {
+            E("f1", "hr", ReasoningEdges.Refutes, 0.7), // f1 weighed — it ruled hr out
+            E("c", "f1", ReasoningEdges.Cites),
+        };
+
+        var r = ReasoningGraphValidator.Validate(G(nodes, edges));
+
+        Assert.DoesNotContain(r.Diagnostics, d => d.Code == ReasoningDiagnosticCodes.CitationNotWeighed);
+        Assert.Empty(r.Diagnostics); // hr is not dangling (has incoming refutes), f1 is grounded
+    }
+
+    // Acceptance (b) — acknowledged counter-evidence: a cited fact that REFUTES THE
+    // SELECTED hypothesis (overruled by stronger support) weighed too → no warn. Honest
+    // reasoning that cites what it argued past must not be flagged.
+    [Fact]
+    public void ConclusionCitesFactRefutingSelected_DoesNotWarn()
+    {
+        var nodes = new[]
+        {
+            R("f1", ReasoningRoles.Fact, FactSources.Doc, "doc://1"), // the counter-evidence
+            R("f2", ReasoningRoles.Fact, FactSources.Api, "api://2"), // the stronger support
+            R("hs", ReasoningRoles.Hypothesis), // the selected
+            R("c", ReasoningRoles.Conclusion),
+        };
+        var edges = new[]
+        {
+            E("f2", "hs", ReasoningEdges.Supports, 0.8),
+            E("f1", "hs", ReasoningEdges.Refutes, 0.3), // net = 0.5 ≥ 0 → not flagged
+            E("c", "hs", ReasoningEdges.Selects),
+            E("c", "f1", ReasoningEdges.Cites), // cites the counter-evidence it overruled
+        };
+
+        var r = ReasoningGraphValidator.Validate(G(nodes, edges));
+
+        Assert.DoesNotContain(r.Diagnostics, d => d.Code == ReasoningDiagnosticCodes.CitationNotWeighed);
+        Assert.Empty(r.Diagnostics); // f1 weighed (refutes hs), hs net-positive, both facts grounded
+    }
+
     // ── backward-compat: a legacy conversation graph is a clean no-op ───────
     [Fact]
     public void LegacyGraph_NoReasoningRoles_IsNoOp()
