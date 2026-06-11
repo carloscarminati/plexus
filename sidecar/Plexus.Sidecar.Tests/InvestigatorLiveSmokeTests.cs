@@ -68,6 +68,8 @@ public class InvestigatorLiveSmokeTests
         Log($"case: {caseText.Replace('\n', ' ')[..Math.Min(140, caseText.Length)]}…");
 
         var stepStructural = new Dictionary<string, List<int>>(StringComparer.Ordinal);
+        var stepResolution = new Dictionary<string, List<int>>(StringComparer.Ordinal);
+        var stepFidelity = new Dictionary<string, List<int>>(StringComparer.Ordinal);
         var stepReferential = new Dictionary<string, List<int>>(StringComparer.Ordinal);
         int okRuns = 0, soundRuns = 0, openTotal = 0, escalatedRuns = 0;
 
@@ -99,7 +101,9 @@ public class InvestigatorLiveSmokeTests
             foreach (var s in run.Steps ?? Array.Empty<StepReport>())
             {
                 Accumulate(stepStructural, s.StepId, s.StructuralFailures);
-                Accumulate(stepReferential, s.StepId, s.ReferentialFailures);
+                Accumulate(stepResolution, s.StepId, s.ResolutionRetries);
+                Accumulate(stepFidelity, s.StepId, s.FidelityRetries);
+                Accumulate(stepReferential, s.StepId, s.ReferentialRetries);
             }
 
             // Fidelity read (R2.2.0-fidelity calibration): dump the first grounded run's
@@ -126,7 +130,8 @@ public class InvestigatorLiveSmokeTests
 
         Log("── per-step retry distribution (min/median/max across runs) ──");
         foreach (var step in Recipes.Investigator.Steps.Select(s => s.Id))
-            Log($"  {step,-13} structural={Dist(stepStructural, step)}  referential={Dist(stepReferential, step)}");
+            Log($"  {step,-13} structural={Dist(stepStructural, step)}  resolution={Dist(stepResolution, step)}  "
+                + $"fidelity={Dist(stepFidelity, step)}  referential={Dist(stepReferential, step)}");
 
         // The thesis line: wiring (okRuns) vs soundness (soundRuns). A run wiring through
         // proves the scaffolding; R1-sound runs are the actual bet — read soundRuns/N.

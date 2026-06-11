@@ -18,17 +18,27 @@ namespace Plexus.Sidecar.Model;
 // constrained decoding) is an OPT-IN that only shortcuts the structural loop — it
 // guarantees the output matches the schema, never the R1 semantic invariants — so it
 // never removes the validator or the re-prompt path. It is plumbed here but not required.
+// The outcome of a post-structural check: a CATEGORY (so retries are attributable — a
+// bad ref vs a mis-citation vs an over-claim say different things) plus the error
+// messages fed back to the model. Empty errors = the check passed.
+public sealed record PostStructuralFinding(string Category, IReadOnlyList<string> Errors)
+{
+    public static readonly PostStructuralFinding Pass = new("", Array.Empty<string>());
+}
+
 public sealed record SchemaEmissionResult(
     bool Ok,
     JsonNode? Value,
     int Attempts,
     IReadOnlyList<string> Errors,
     string? Error,
-    // Instrumentation (ADR-0002 R2.0b smoke): how many attempts failed each way. The
-    // two are counted separately because they say different things about the model tier
-    // — structural = "didn't match the shape", referential = "invented a bad ref".
+    // Instrumentation (ADR-0002 R2.0b smoke): how many attempts failed each way.
+    // structural = "didn't match the shape"; PostStructuralFailures = the conflated total
+    // of all post-structural retries, kept for the no-loss invariant; PostStructuralByCategory
+    // attributes that total per check category (resolution / fidelity / referential).
     int StructuralFailures = 0,
-    int PostStructuralFailures = 0);
+    int PostStructuralFailures = 0,
+    IReadOnlyDictionary<string, int>? PostStructuralByCategory = null);
 
 public static class SchemaConstrainedEmitter
 {
@@ -44,13 +54,14 @@ public static class SchemaConstrainedEmitter
         // because a check may itself call a model (the fidelity judge). Its errors feed the
         // SAME bounded re-prompt loop — so a real model's bad ref / laundered claim is
         // corrected, or surfaced explicitly on exhaustion. Never silently dropped.
-        Func<JsonNode, CancellationToken, Task<IReadOnlyList<string>>>? postStructuralCheck = null,
+        Func<JsonNode, CancellationToken, Task<PostStructuralFinding>>? postStructuralCheck = null,
         CancellationToken ct = default)
     {
         var messages = new List<ChatMessage> { new(ChatRole.User, instruction) };
         var options = new ChatOptions { ModelId = modelId, ResponseFormat = responseFormat };
         IReadOnlyList<string> lastErrors = new[] { "no attempt made" };
         int structuralFailures = 0, postStructuralFailures = 0;
+        var byCategory = new Dictionary<string, int>(StringComparer.Ordinal);
 
         for (var attempt = 1; attempt <= maxAttempts; attempt++)
         {
@@ -69,14 +80,15 @@ public static class SchemaConstrainedEmitter
             }
             else
             {
-                var checkErrors = postStructuralCheck is null
-                    ? Array.Empty<string>()
+                var finding = postStructuralCheck is null
+                    ? PostStructuralFinding.Pass
                     : await postStructuralCheck(json, ct);
-                if (checkErrors.Count == 0)
+                if (finding.Errors.Count == 0)
                     return new SchemaEmissionResult(true, json, attempt, Array.Empty<string>(), null,
-                        structuralFailures, postStructuralFailures);
-                lastErrors = checkErrors;
+                        structuralFailures, postStructuralFailures, byCategory);
+                lastErrors = finding.Errors;
                 postStructuralFailures++;
+                byCategory[finding.Category] = byCategory.GetValueOrDefault(finding.Category) + 1; // attribute, in lockstep with the total
             }
 
             // Auto-fix: echo the bad turn and feed the errors back for a correction.
@@ -90,7 +102,7 @@ public static class SchemaConstrainedEmitter
         return new SchemaEmissionResult(
             false, null, maxAttempts, lastErrors,
             $"Emission did not satisfy the schema after {maxAttempts} attempt(s).",
-            structuralFailures, postStructuralFailures);
+            structuralFailures, postStructuralFailures, byCategory);
     }
 
     // Tolerant extraction of the outermost JSON object: strip a ```json fence if one

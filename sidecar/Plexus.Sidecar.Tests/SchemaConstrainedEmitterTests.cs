@@ -59,4 +59,30 @@ public class SchemaConstrainedEmitterTests
 
         Assert.True(JsonSchemaGen.Validate(ReasoningSchemas.Fact, JsonNode.Parse(ValidFact), out _));
     }
+
+    // No-loss invariant (the gate for the counter split): the per-category post-structural
+    // counts sum to the conflated total — no double-count, no loss. Proves the split is
+    // pure re-bucketing, not a behavior change.
+    [Fact]
+    public async Task PostStructuralRetries_SplitByCategory_SumEqualsTotal()
+    {
+        var schema = JsonSchemaGen.Compile(new JsonObject { ["type"] = "object" }); // {} passes structurally
+        var findings = new Queue<PostStructuralFinding>(new[]
+        {
+            new PostStructuralFinding("alpha", new[] { "x" }),
+            new PostStructuralFinding("beta", new[] { "y" }),
+            PostStructuralFinding.Pass,
+        });
+
+        var r = await SchemaConstrainedEmitter.EmitAsync(
+            new ScriptedChatClient("{}", "{}", "{}"), "m", "go", schema, maxAttempts: 4,
+            postStructuralCheck: (_, _) => Task.FromResult(findings.Dequeue()));
+
+        Assert.True(r.Ok);
+        Assert.Equal(0, r.StructuralFailures);
+        Assert.Equal(2, r.PostStructuralFailures);                  // the conflated total
+        Assert.Equal(2, r.PostStructuralByCategory!.Values.Sum());  // == sum of the split
+        Assert.Equal(1, r.PostStructuralByCategory["alpha"]);
+        Assert.Equal(1, r.PostStructuralByCategory["beta"]);
+    }
 }

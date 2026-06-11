@@ -67,7 +67,8 @@ public class ReasoningGroundingTests
 
         Assert.True(run.Ok);
         var facts = Assert.Single(run.Steps!, s => s.StepId == "facts");
-        Assert.Equal(1, facts.ReferentialFailures); // the grounding check fired
+        Assert.Equal(1, facts.ResolutionRetries); // a mis-citation, attributed to resolution
+        Assert.Equal(0, facts.FidelityRetries);   // not fidelity (resolution gates it)
         Assert.Equal(0, facts.StructuralFailures);
         Assert.Single(run.Graph.Edges, e => e.Kind == ReasoningEdges.Grounds && e.To == "s1");
     }

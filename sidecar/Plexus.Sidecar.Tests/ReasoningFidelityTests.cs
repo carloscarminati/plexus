@@ -37,7 +37,8 @@ public class ReasoningFidelityTests
             factSource: new CuratedFactSource(Corpus), fidelityJudge: judge);
 
         Assert.True(run.Ok);
-        Assert.Equal(0, Assert.Single(run.Steps!, s => s.StepId == "facts").ReferentialFailures);
+        var facts = Assert.Single(run.Steps!, s => s.StepId == "facts");
+        Assert.Equal(0, facts.ResolutionRetries + facts.FidelityRetries); // clean: neither fired
         Assert.True(judge.Calls >= 1); // the claim was actually judged, not waved through
     }
 
@@ -53,7 +54,9 @@ public class ReasoningFidelityTests
             FrameFacts(), "small", factSource: new CuratedFactSource(Corpus), fidelityJudge: judge);
 
         Assert.True(run.Ok);
-        Assert.Equal(1, Assert.Single(run.Steps!, s => s.StepId == "facts").ReferentialFailures); // fidelity fired
+        var facts = Assert.Single(run.Steps!, s => s.StepId == "facts");
+        Assert.Equal(1, facts.FidelityRetries);   // an over-claim, attributed to fidelity
+        Assert.Equal(0, facts.ResolutionRetries);  // not resolution (the ref resolved)
         Assert.Equal("engine over-revved", run.Graph.Nodes.Single(n => n.Reasoning?.Role == ReasoningRoles.Fact).Raw);
     }
 

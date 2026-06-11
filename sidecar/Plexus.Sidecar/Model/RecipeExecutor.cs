@@ -40,7 +40,11 @@ public sealed record StepReport(
     bool Ok,
     int Attempts,
     int StructuralFailures,
-    int ReferentialFailures);
+    // The post-structural retries, attributed (was one conflated counter). Their sum is
+    // the total post-structural retries for the step — no double-count, no loss.
+    int ResolutionRetries,
+    int FidelityRetries,
+    int ReferentialRetries);
 
 public static class RecipeExecutor
 {
@@ -75,8 +79,7 @@ public static class RecipeExecutor
                 client, modelId, instruction, schema, maxAttempts,
                 postStructuralCheck: RefCheckFor(step, state, fidelityJudge), ct: ct);
 
-            reports.Add(new StepReport(step.Id, step.Role, result.Ok, result.Attempts,
-                result.StructuralFailures, result.PostStructuralFailures));
+            reports.Add(ReportFor(step.Id, step.Role, result));
 
             // A structured emission that never validates must surface explicitly — it
             // can NOT degrade to free text without breaking the typed-graph contract.
@@ -126,8 +129,7 @@ public static class RecipeExecutor
                 client, escalateModelId, instruction, schema, maxAttempts,
                 postStructuralCheck: RefCheckFor(step, state, fidelityJudge), ct: ct);
 
-            reports.Add(new StepReport($"{step.Id}*escalated", step.Role, result.Ok, result.Attempts,
-                result.StructuralFailures, result.PostStructuralFailures));
+            reports.Add(ReportFor($"{step.Id}*escalated", step.Role, result));
             if (!result.Ok || result.Value is null)
                 break; // escalation failed to emit; leave what we have, record what we tried
 
@@ -204,27 +206,28 @@ public static class RecipeExecutor
     // A real model sometimes references a ref that doesn't exist; rather than silently
     // drop the edge (which would hide the model's error and lose information — fatal in
     // an auditability tool), we feed it back to the auto-fix loop, then fail explicitly.
-    private static Func<JsonNode, CancellationToken, Task<IReadOnlyList<string>>>? RefCheckFor(
+    private static Func<JsonNode, CancellationToken, Task<PostStructuralFinding>>? RefCheckFor(
         RecipeStep step, RunState state, IFidelityJudge? fidelityJudge)
     {
         // Grounded facts: two layers. RESOLUTION — the sourceRef must cite a retrieved
         // source (sync, cheap). FIDELITY — the claim must be SUPPORTED by that source, not
         // merely cite it (async, the judge); this is what blocks laundering. Both feed the
-        // same auto-fix loop.
+        // same auto-fix loop, but are attributed to DISTINCT categories so a retry says
+        // which one (a mis-citation vs an over-claim).
         if (step.Role == ReasoningRoles.Fact && state.Sources.Count > 0)
             return (json, ct) => GroundedFactsCheckAsync(json, state, fidelityJudge, ct);
 
         return step.Role is ReasoningRoles.Hypothesis or ReasoningRoles.Evaluation or ReasoningRoles.Conclusion
-            ? (json, _) => Task.FromResult(UnresolvedRefs(step.Role, json, state.RefToId))
+            ? (json, _) => Task.FromResult(new PostStructuralFinding(Category.Referential, UnresolvedRefs(step.Role, json, state.RefToId)))
             : null;
     }
 
-    private static async Task<IReadOnlyList<string>> GroundedFactsCheckAsync(
+    private static async Task<PostStructuralFinding> GroundedFactsCheckAsync(
         JsonNode json, RunState state, IFidelityJudge? judge, CancellationToken ct)
     {
         var resolution = UngroundedFacts(json, state.SourceIds);
         if (resolution.Count > 0 || judge is null)
-            return resolution; // don't judge fidelity until every ref resolves
+            return new PostStructuralFinding(Category.Resolution, resolution); // gate fidelity until every ref resolves
 
         var bad = new List<string>();
         foreach (var f in json["facts"]?.AsArray() ?? new JsonArray())
@@ -237,7 +240,24 @@ public static class RecipeExecutor
             if (sourceText is not null && !await judge.IsSupportedAsync(claim, sourceText, ct))
                 bad.Add($"the claim \"{Truncate(claim, 60)}\" is not supported by source '{sref}' — cite a source that supports it, or drop the claim");
         }
-        return bad;
+        return new PostStructuralFinding(Category.Fidelity, bad);
+    }
+
+    // Post-structural retry categories — what a grounding/ref retry was actually about.
+    private static class Category
+    {
+        public const string Resolution = "resolution"; // sourceRef doesn't resolve to a retrieved source (mis-citation)
+        public const string Fidelity = "fidelity";     // sourceRef resolves but the claim isn't supported (over-claim)
+        public const string Referential = "referential"; // an emitted ref (f0/h0/u0) doesn't resolve in the set (R2.0b)
+    }
+
+    // Build a step report, attributing the emission's post-structural retries per category.
+    private static StepReport ReportFor(string stepId, string role, SchemaEmissionResult r)
+    {
+        var by = r.PostStructuralByCategory;
+        int Cat(string c) => by?.GetValueOrDefault(c) ?? 0;
+        return new StepReport(stepId, role, r.Ok, r.Attempts, r.StructuralFailures,
+            Cat(Category.Resolution), Cat(Category.Fidelity), Cat(Category.Referential));
     }
 
     private static IReadOnlyList<string> UngroundedFacts(JsonNode json, IReadOnlySet<string> sourceIds)

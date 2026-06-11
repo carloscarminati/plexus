@@ -51,7 +51,7 @@ public class RecipeTelemetryTests
         var facts = Assert.Single(run.Steps!, s => s.StepId == "facts");
         Assert.Equal(2, facts.Attempts);
         Assert.Equal(1, facts.StructuralFailures);
-        Assert.Equal(0, facts.ReferentialFailures);
+        Assert.Equal(0, facts.ResolutionRetries + facts.FidelityRetries + facts.ReferentialRetries);
     }
 
     // A bad ref is counted as REFERENTIAL (and not structural) — the emission's shape
@@ -66,7 +66,8 @@ public class RecipeTelemetryTests
         var eval = Assert.Single(run.Steps!, s => s.StepId == "evaluation");
         Assert.Equal(2, eval.Attempts);
         Assert.Equal(0, eval.StructuralFailures);
-        Assert.Equal(1, eval.ReferentialFailures);
+        Assert.Equal(1, eval.ReferentialRetries); // referential-integrity, attributed distinctly
+        Assert.Equal(0, eval.ResolutionRetries + eval.FidelityRetries);
     }
 
     // The ref-carrying step's instruction lists the available refs so the model can
