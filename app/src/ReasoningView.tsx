@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import type { Adjudication, AdjudicationDecision, Graph, ReasoningDiagnostic } from "./contract";
-import { buildArgumentView } from "./reasoning-view";
+import { buildArgumentView, deriveReviewState } from "./reasoning-view";
 
 // Renders the structured-argument view from the pure view-model. Surfaces the
 // server-computed R1 diagnostics inline — a flagged conclusion is shown flagged. When an
@@ -20,12 +20,26 @@ export function ReasoningView({
   onAdjudicate?: (decision: AdjudicationDecision, note?: string) => void;
 }) {
   const v = buildArgumentView(graph, diagnostics, openUncertainties);
+  const reviewState = deriveReviewState(v.diagnostics, adjudication);
+  const warnCount = v.diagnostics.filter((d) => d.severity === "warn").length;
 
   return (
     <div className="reasoning-view">
-      {v.diagnostics.length > 0 && (
-        <div className="reasoning-banner">
-          ⚠ {v.diagnostics.length} issue{v.diagnostics.length > 1 ? "s" : ""} caught by the reasoning invariants
+      {reviewState === "requires_review" && (
+        <div className="review-banner requires-review">
+          <strong>⚠ Human review required</strong>
+          <span>The machine flagged this reasoning and could not auto-resolve it — a human must review.</span>
+        </div>
+      )}
+      {reviewState === "reviewed" && (
+        <div className="review-banner reviewed">
+          <strong>✓ Reviewed</strong>
+          <span>Adjudicated by a human — the decision is recorded below; the flag remains for audit.</span>
+        </div>
+      )}
+      {reviewState === "clean" && warnCount > 0 && (
+        <div className="review-banner advisory">
+          {warnCount} advisory warning{warnCount > 1 ? "s" : ""} surfaced — review not required.
         </div>
       )}
 

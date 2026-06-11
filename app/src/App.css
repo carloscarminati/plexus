@@ -1444,6 +1444,41 @@ body.col-resizing {
   padding: 8px 12px;
   font-size: 13px;
 }
+
+/* ── Review state (Rx.2.1) — derived from diagnostics + adjudication ──────────── */
+.review-banner {
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.review-banner strong {
+  font-size: 14px;
+  letter-spacing: 0.01em;
+}
+.review-banner span {
+  opacity: 0.85;
+}
+/* RequiresHumanReview — prominent: the machine flagged and couldn't auto-resolve. */
+.review-banner.requires-review {
+  background: rgba(255, 107, 107, 0.13);
+  border: 1px solid rgba(255, 107, 107, 0.6);
+  color: #ff8585;
+}
+/* Reviewed — resolved; the adjudication sits below, the flag remains for audit. */
+.review-banner.reviewed {
+  background: color-mix(in srgb, #5cc97a 12%, transparent);
+  border: 1px solid color-mix(in srgb, #5cc97a 50%, transparent);
+  color: #5cc97a;
+}
+/* Clean-with-advisory — warns surfaced, review not required. */
+.review-banner.advisory {
+  background: color-mix(in srgb, var(--muted) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--muted) 35%, transparent);
+  color: var(--muted);
+}
 .reasoning-section {
   display: flex;
   flex-direction: column;

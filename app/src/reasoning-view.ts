@@ -159,6 +159,22 @@ export function buildArgumentView(
   } satisfies ArgumentView;
 }
 
+// ── review state (Rx.2.1) — derived, no new persisted state ──────────────────
+// A flagged PERSISTED graph already implies escalate-exhausted (the run finished and the
+// flag stuck), so "needs a human" is a pure function of what already travels with the
+// graph: the R1 diagnostics (Rx-next.0) and the adjudication (Rx.2.0). Adjudication
+// resolves it; an unresolved flag/error demands a human; warns alone are advisory.
+export type ReviewState = "clean" | "requires_review" | "reviewed";
+
+export function deriveReviewState(
+  diagnostics: ReasoningDiagnostic[],
+  adjudication: Adjudication | null | undefined,
+): ReviewState {
+  if (adjudication) return "reviewed"; // flagged AND adjudicated-with-reason → resolved (flag still visible)
+  const flagged = diagnostics.some((d) => d.severity === "flag" || d.severity === "error");
+  return flagged ? "requires_review" : "clean"; // warns alone are advisory, not review-gating
+}
+
 // ── dev round-trip flow (pure; the hook + a mock WS drive the same reducer) ──────────
 export interface ReasoningSession {
   status: "idle" | "running" | "loading" | "ready" | "error";

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { Graph, Node, Edge, ReasoningDiagnostic, ReasoningRole } from "./contract";
-import { buildArgumentView, reduceReasoning, emptyReasoningSession, type ArgumentView } from "./reasoning-view";
+import { buildArgumentView, reduceReasoning, emptyReasoningSession, deriveReviewState, type ArgumentView } from "./reasoning-view";
 
 // ── fixtures ────────────────────────────────────────────────────────────────
 const rnode = (id: string, role: ReasoningRole, raw: string, src?: { kind: string; ref: string }): Node => ({
@@ -183,6 +183,45 @@ describe("reduceReasoning — dev round-trip", () => {
     expect(afterGraph.session.status).toBe("ready");
 
     const view = buildArgumentView(afterGraph.session.graph!, afterGraph.session.diagnostics, afterGraph.session.openUncertainties);
+    expect(view.conclusion!.diagnostics[0].code).toBe("conclusion_net_negative");
+  });
+});
+
+// ── review state derivation (Rx.2.1): pure function of (diagnostics, adjudication) ──
+describe("deriveReviewState — review state is derived, not stored", () => {
+  const warn: ReasoningDiagnostic = { severity: "warn", code: "citation_not_weighed", message: "advisory" };
+  const error: ReasoningDiagnostic = { severity: "error", code: "fact_no_provenance", message: "bad" };
+  const adj = { decision: "accept" as const, note: "accept despite the flag", reviewer: "carlos", timestamp: "2026-06-11T00:00:00Z" };
+
+  it("flag + no adjudication → requires_review", () => {
+    expect(deriveReviewState([flag], null)).toBe("requires_review");
+  });
+  it("error tier also gates → requires_review", () => {
+    expect(deriveReviewState([error], null)).toBe("requires_review");
+  });
+  it("flag + adjudication → reviewed", () => {
+    expect(deriveReviewState([flag], adj)).toBe("reviewed");
+  });
+  it("no flag → clean", () => {
+    expect(deriveReviewState([], null)).toBe("clean");
+  });
+  it("warn alone → clean (advisory, not review-gating)", () => {
+    expect(deriveReviewState([warn], null)).toBe("clean");
+  });
+
+  it("the transition that matters: requires_review → reviewed, flag survives", () => {
+    expect(deriveReviewState([flag], null)).toBe("requires_review");
+
+    // adjudicate via the real reducer flow (accept-with-note lands beside the graph)
+    const ready = reduceReasoning(
+      { ...emptyReasoningSession, status: "loading" },
+      { type: "reasoning_graph", graph: cleanGraph(), diagnostics: [flag], openUncertainties: [] },
+    ).session;
+    const after = reduceReasoning(ready, { type: "adjudication_saved", graphId: "g", adjudication: adj }).session;
+
+    expect(deriveReviewState(after.diagnostics, after.adjudication)).toBe("reviewed");
+    // Reviewed = flagged AND adjudicated — the flag is still on the conclusion.
+    const view = buildArgumentView(after.graph!, after.diagnostics, after.openUncertainties);
     expect(view.conclusion!.diagnostics[0].code).toBe("conclusion_net_negative");
   });
 });
