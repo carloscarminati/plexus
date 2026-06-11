@@ -69,6 +69,18 @@ public sealed class GraphStore
                 weight   REAL
             );
             CREATE INDEX IF NOT EXISTS idx_edges_graph ON edges(graph_id);
+            -- Human adjudications (ADR-0002 Rx.2.0). A SEPARATE record from the reasoning
+            -- nodes/edges — additive review metadata, one per graph (register/update), that
+            -- travels with the graph on load. The CHECK is the atomicity backstop: a bad
+            -- decision is rejected by the DB, so the upsert rolls back rather than writing
+            -- a partial/garbage row.
+            CREATE TABLE IF NOT EXISTS adjudications (
+                graph_id  TEXT PRIMARY KEY REFERENCES graphs(id) ON DELETE CASCADE,
+                decision  TEXT NOT NULL CHECK (decision IN ('accept', 'reject')),
+                note      TEXT,
+                reviewer  TEXT NOT NULL,
+                timestamp TEXT NOT NULL
+            );
             """;
         cmd.ExecuteNonQuery();
 
@@ -408,6 +420,61 @@ public sealed class GraphStore
         }
 
         tx.Commit();
+    }
+
+    // Record (or replace) the adjudication for a graph ATOMICALLY (ADR-0002 Rx.2.0). A
+    // single-row upsert inside a transaction: a DB-rejected write (e.g. an invalid decision
+    // tripping the CHECK) rolls the transaction back, so a failed adjudicate leaves the
+    // prior state intact — never a partial one. The timestamp is stamped here (server-side),
+    // not trusted from the client. Returns the stored adjudication.
+    public Adjudication SaveAdjudication(string graphId, string decision, string? note, string reviewer)
+    {
+        var adj = new Adjudication
+        {
+            Decision = decision,
+            Note = note,
+            Reviewer = reviewer,
+            Timestamp = DateTimeOffset.UtcNow.ToString("o"),
+        };
+        using var conn = Open();
+        using var tx = conn.BeginTransaction();
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.Transaction = tx;
+            cmd.CommandText = """
+                INSERT INTO adjudications (graph_id, decision, note, reviewer, timestamp)
+                VALUES ($gid, $decision, $note, $reviewer, $ts)
+                ON CONFLICT(graph_id) DO UPDATE SET
+                    decision = excluded.decision, note = excluded.note,
+                    reviewer = excluded.reviewer, timestamp = excluded.timestamp;
+                """;
+            cmd.Parameters.AddWithValue("$gid", graphId);
+            cmd.Parameters.AddWithValue("$decision", decision);
+            cmd.Parameters.AddWithValue("$note", (object?)note ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("$reviewer", reviewer);
+            cmd.Parameters.AddWithValue("$ts", adj.Timestamp);
+            cmd.ExecuteNonQuery();
+        }
+        tx.Commit();
+        return adj;
+    }
+
+    public Adjudication? LoadAdjudication(string graphId)
+    {
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT decision, note, reviewer, timestamp FROM adjudications WHERE graph_id = $gid;";
+        cmd.Parameters.AddWithValue("$gid", graphId);
+        using var reader = cmd.ExecuteReader();
+        if (!reader.Read())
+            return null;
+        return new Adjudication
+        {
+            Decision = reader.GetString(0),
+            Note = reader.IsDBNull(1) ? null : reader.GetString(1),
+            Reviewer = reader.GetString(2),
+            Timestamp = reader.GetString(3),
+        };
     }
 
     public void AddNode(string graphId, Node node)

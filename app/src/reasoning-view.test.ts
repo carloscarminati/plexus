@@ -159,3 +159,42 @@ describe("reduceReasoning — dev round-trip", () => {
     expect(view.conclusion!.diagnostics[0].code).toBe("conclusion_net_negative");
   });
 });
+
+// ── adjudication — additive metadata, never mutates the reasoning (Rx.2.0) ───
+describe("reduceReasoning — adjudication is recorded beside the unchanged view", () => {
+  const adj = { decision: "accept" as const, note: "accept despite the net-negative", reviewer: "carlos", timestamp: "2026-06-11T00:00:00Z" };
+
+  it("adjudication_saved merges the decision into a ready session, untouched graph", () => {
+    const ready = reduceReasoning(
+      { ...emptyReasoningSession, status: "loading" },
+      { type: "reasoning_graph", graph: cleanGraph(), diagnostics: [flag], openUncertainties: [] },
+    ).session;
+    expect(ready.adjudication).toBeNull();
+
+    const after = reduceReasoning(ready, { type: "adjudication_saved", graphId: "g", adjudication: adj }).session;
+    expect(after.adjudication).toEqual(adj);
+    expect(after.graph).toBe(ready.graph); // same graph reference — reasoning untouched
+    expect(after.diagnostics).toEqual(ready.diagnostics);
+  });
+
+  it("the flag SURVIVES an accept — adjudication sits beside it, never clears it", () => {
+    const ready = reduceReasoning(
+      { ...emptyReasoningSession, status: "loading" },
+      { type: "reasoning_graph", graph: cleanGraph(), diagnostics: [flag], openUncertainties: [] },
+    ).session;
+    const after = reduceReasoning(ready, { type: "adjudication_saved", graphId: "g", adjudication: adj }).session;
+
+    // the net-negative flag is still on the conclusion AFTER accepting
+    const view = buildArgumentView(after.graph!, after.diagnostics, after.openUncertainties);
+    expect(view.conclusion!.diagnostics[0].code).toBe("conclusion_net_negative");
+    expect(after.adjudication!.decision).toBe("accept"); // flagged AND accepted-with-reason, both present
+  });
+
+  it("a reloaded graph carries its adjudication back (round-trip)", () => {
+    const reloaded = reduceReasoning(
+      { ...emptyReasoningSession, status: "loading" },
+      { type: "reasoning_graph", graph: cleanGraph(), diagnostics: [], openUncertainties: [], adjudication: adj },
+    ).session;
+    expect(reloaded.adjudication).toEqual(adj);
+  });
+});

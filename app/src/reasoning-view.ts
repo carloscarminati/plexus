@@ -2,7 +2,7 @@
 // of the React component so it's testable: (graph + server-computed R1 diagnostics) →
 // a flat model the view renders. The diagnostics are the system's own (the C# validator),
 // so a flagged conclusion can never be presented as clean.
-import type { ClientEvent, Edge, Graph, ReasoningDiagnostic, ServerEvent } from "./contract";
+import type { Adjudication, ClientEvent, Edge, Graph, ReasoningDiagnostic, ServerEvent } from "./contract";
 
 export interface FactItem {
   id: string;
@@ -157,6 +157,7 @@ export interface ReasoningSession {
   graph: Graph | null;
   diagnostics: ReasoningDiagnostic[];
   openUncertainties: string[];
+  adjudication: Adjudication | null; // ADR-0002 Rx.2.0 — the human decision, beside (never folded into) the reasoning
   error?: string;
 }
 
@@ -165,6 +166,7 @@ export const emptyReasoningSession: ReasoningSession = {
   graph: null,
   diagnostics: [],
   openUncertainties: [],
+  adjudication: null,
 };
 
 // Process a server event for the reasoning dev flow; returns the next session and an
@@ -186,8 +188,13 @@ export function reduceReasoning(
           graph: event.graph,
           diagnostics: event.diagnostics,
           openUncertainties: event.openUncertainties,
+          adjudication: event.adjudication ?? null,
         },
       };
+    // Additive: the adjudication is merged beside the unchanged argument view — the graph
+    // and its R1 diagnostics are deliberately NOT touched (a flagged graph stays flagged).
+    case "adjudication_saved":
+      return { session: { ...session, adjudication: event.adjudication } };
     case "error":
       return session.status === "running" || session.status === "loading"
         ? { session: { ...session, status: "error", error: event.message } }

@@ -1,17 +1,23 @@
-import type { ReactNode } from "react";
-import type { Graph, ReasoningDiagnostic } from "./contract";
+import { useState, type ReactNode } from "react";
+import type { Adjudication, AdjudicationDecision, Graph, ReasoningDiagnostic } from "./contract";
 import { buildArgumentView } from "./reasoning-view";
 
 // Renders the structured-argument view from the pure view-model. Surfaces the
-// server-computed R1 diagnostics inline — a flagged conclusion is shown flagged.
+// server-computed R1 diagnostics inline — a flagged conclusion is shown flagged. When an
+// onAdjudicate handler is given, the human decision seam (Rx.2.0) renders below the
+// argument — additive, beside the unchanged reasoning, never folded into it.
 export function ReasoningView({
   graph,
   diagnostics,
   openUncertainties,
+  adjudication,
+  onAdjudicate,
 }: {
   graph: Graph;
   diagnostics: ReasoningDiagnostic[];
   openUncertainties: string[];
+  adjudication?: Adjudication | null;
+  onAdjudicate?: (decision: AdjudicationDecision, note?: string) => void;
 }) {
   const v = buildArgumentView(graph, diagnostics, openUncertainties);
 
@@ -82,8 +88,62 @@ export function ReasoningView({
           </Item>
         </Section>
       )}
+
+      {onAdjudicate && <AdjudicationPanel adjudication={adjudication} onAdjudicate={onAdjudicate} />}
     </div>
   );
+}
+
+// The human decision seam. Shows the current adjudication if one exists (decision + note
+// + reviewer + when), and lets the reviewer record/update one. The flags above inform the
+// reviewer but never gate this — accepting a clean argument is a valid audit act too.
+function AdjudicationPanel({
+  adjudication,
+  onAdjudicate,
+}: {
+  adjudication?: Adjudication | null;
+  onAdjudicate: (decision: AdjudicationDecision, note?: string) => void;
+}) {
+  const [note, setNote] = useState(adjudication?.note ?? "");
+
+  return (
+    <section className="reasoning-section reasoning-adjudication">
+      <h4 className="reasoning-section-title">Adjudication</h4>
+      {adjudication ? (
+        <div className={`adjudication-current decision-${adjudication.decision}`}>
+          <span className="adjudication-decision">
+            {adjudication.decision === "accept" ? "✓ Accepted" : "✗ Rejected"}
+          </span>
+          {adjudication.note && <span className="adjudication-note">“{adjudication.note}”</span>}
+          <span className="reasoning-rel">
+            — {adjudication.reviewer}, {formatWhen(adjudication.timestamp)}
+          </span>
+        </div>
+      ) : (
+        <p className="reasoning-rel">No adjudication yet.</p>
+      )}
+      <textarea
+        className="settings-input adjudication-input"
+        rows={2}
+        placeholder="Note (optional) — e.g. why you accept despite a flag"
+        value={note}
+        onChange={(e) => setNote(e.currentTarget.value)}
+      />
+      <div className="settings-row adjudication-actions">
+        <button className="btn-accept" onClick={() => onAdjudicate("accept", note)}>
+          {adjudication ? "Update → Accept" : "Accept"}
+        </button>
+        <button className="btn-reject" onClick={() => onAdjudicate("reject", note)}>
+          {adjudication ? "Update → Reject" : "Reject"}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function formatWhen(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
 }
 
 function Section({ title, children }: { title: string; children: ReactNode }) {

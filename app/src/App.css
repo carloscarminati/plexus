@@ -1519,3 +1519,73 @@ body.col-resizing {
   background: color-mix(in srgb, var(--muted) 14%, transparent);
   border: 1px solid color-mix(in srgb, var(--muted) 40%, transparent);
 }
+
+/* ── Adjudication — the human decision seam (Rx.2.0) ───────────────────────── */
+.reasoning-adjudication {
+  margin-top: 6px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  gap: 8px;
+}
+.adjudication-current {
+  font-size: 13px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border-left: 3px solid var(--border);
+  background: color-mix(in srgb, var(--muted) 8%, transparent);
+}
+.adjudication-current.decision-accept {
+  border-left-color: #5cc97a;
+}
+.adjudication-current.decision-reject {
+  border-left-color: #ff6b6b;
+}
+.adjudication-decision {
+  font-weight: 600;
+}
+.decision-accept .adjudication-decision {
+  color: #5cc97a;
+}
+.decision-reject .adjudication-decision {
+  color: #ff6b6b;
+}
+.adjudication-note {
+  color: var(--text);
+  font-style: italic;
+}
+.adjudication-input {
+  width: 100%;
+  resize: vertical;
+  font-size: 13px;
+}
+.adjudication-actions {
+  gap: 8px;
+}
+.btn-accept,
+.btn-reject {
+  border-radius: 8px;
+  padding: 6px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  background: var(--bg);
+  border: 1px solid var(--border);
+}
+.btn-accept {
+  color: #5cc97a;
+  border-color: color-mix(in srgb, #5cc97a 55%, transparent);
+}
+.btn-accept:hover {
+  background: color-mix(in srgb, #5cc97a 14%, transparent);
+}
+.btn-reject {
+  color: #ff6b6b;
+  border-color: color-mix(in srgb, #ff6b6b 55%, transparent);
+}
+.btn-reject:hover {
+  background: color-mix(in srgb, #ff6b6b 14%, transparent);
+}

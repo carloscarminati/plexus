@@ -267,11 +267,39 @@ public sealed class WebSocketHub
                     Graph = rgraph,
                     Diagnostics = result.Diagnostics.ToList(),
                     OpenUncertainties = result.OpenUncertainties.ToList(),
+                    Adjudication = _store.LoadAdjudication(lrg.GraphId), // travels with the graph, if one exists
                 });
+                break;
+            }
+
+            // ADR-0002 Rx.2.0 — record a human adjudication over a loaded graph. Validate
+            // the graph exists and the decision is well-formed BEFORE writing, so a bad
+            // request never persists anything. The write is additive: it does NOT touch the
+            // reasoning nodes/edges/diagnostics — a flagged graph stays flagged.
+            case AdjudicateGraphEvent adj:
+            {
+                if (!_store.GraphExists(adj.GraphId))
+                {
+                    await SendAsync(new ErrorServerEvent { Message = $"Graph '{adj.GraphId}' not found." });
+                    break;
+                }
+                if (!AdjudicationDecisions.IsValid(adj.Decision))
+                {
+                    await SendAsync(new ErrorServerEvent { Message = $"Invalid adjudication decision '{adj.Decision}' (expected accept|reject)." });
+                    break;
+                }
+                var saved = _store.SaveAdjudication(adj.GraphId, adj.Decision, adj.Note, ReviewerIdentity());
+                await SendAsync(new AdjudicationSavedServerEvent { GraphId = adj.GraphId, Adjudication = saved });
                 break;
             }
         }
     }
+
+    // Placeholder reviewer attribution (ADR-0002 Rx.2.0): the local dev identity. Real
+    // identity + cryptographic signature are deferred — this is enough to attribute a
+    // decision to "who", which is the point of the audit record now.
+    private static string ReviewerIdentity() =>
+        Environment.UserName is { Length: > 0 } u ? u : "local-reviewer";
 
     private bool HasAnthropicKey() => _keychain.GetAnthropicKey() is not null;
     private static ErrorServerEvent NoKeyError() =>

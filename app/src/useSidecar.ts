@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AppSettingsView, ClientEvent, Graph, McpServerView, ModelInfo, ProviderView, RoutingPolicy, ServerEvent } from "./contract";
+import type { AdjudicationDecision, AppSettingsView, ClientEvent, Graph, McpServerView, ModelInfo, ProviderView, RoutingPolicy, ServerEvent } from "./contract";
 import { emptyReasoningSession, type ReasoningSession } from "./reasoning-view";
 
 const SIDECAR_URL = "ws://127.0.0.1:8765/ws";
@@ -121,7 +121,11 @@ export function useSidecar() {
           setReasoning((r) => ({ ...r, status: "loading" }));
           break;
         case "reasoning_graph":
-          setReasoning({ status: "ready", graph: msg.graph, diagnostics: msg.diagnostics, openUncertainties: msg.openUncertainties });
+          setReasoning({ status: "ready", graph: msg.graph, diagnostics: msg.diagnostics, openUncertainties: msg.openUncertainties, adjudication: msg.adjudication ?? null });
+          break;
+        // ADR-0002 Rx.2.0: a recorded adjudication — merged beside the unchanged view.
+        case "adjudication_saved":
+          setReasoning((r) => ({ ...r, adjudication: msg.adjudication }));
           break;
       }
     };
@@ -229,6 +233,11 @@ export function useSidecar() {
   const runReasoning = useCallback((caseText: string) => {
     setReasoning({ ...emptyReasoningSession, status: "running" });
     send({ type: "dev_run_recipe", caseText });
+  }, [send]);
+  // ADR-0002 Rx.2.0: record/update the human adjudication on the loaded graph. Additive —
+  // the server confirms with adjudication_saved; the argument view is untouched.
+  const adjudicate = useCallback((graphId: string, decision: AdjudicationDecision, note?: string) => {
+    send({ type: "adjudicate_graph", graphId, decision, note: note?.trim() ? note.trim() : undefined });
   }, [send]);
 
   // Click a node: plain click selects only it; shift/cmd-click toggles it in the
@@ -359,5 +368,6 @@ export function useSidecar() {
     deleteProvider,
     reasoning,
     runReasoning,
+    adjudicate,
   };
 }

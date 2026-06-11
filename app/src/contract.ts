@@ -145,6 +145,17 @@ export interface ReasoningDiagnostic {
   edgeTo?: string;
 }
 
+// ADR-0002 Rx.2.0 — a human adjudication over a graph. Generic review primitive (no
+// regime semantics): additive metadata that never mutates the reasoning. reviewer +
+// timestamp are server-assigned.
+export type AdjudicationDecision = "accept" | "reject";
+export interface Adjudication {
+  decision: AdjudicationDecision;
+  note?: string;
+  reviewer: string;
+  timestamp: string;
+}
+
 // ── Model routing (R1) ──────────────────────────────────────────────────────
 
 export type RoutingObjective = "cost" | "quality" | "balanced";
@@ -234,7 +245,8 @@ export type ClientEvent =
   | { type: "delete_provider"; id: string }
   // ADR-0002 Rx (dev): run a reasoning recipe over raw case text; fetch the graph + R1.
   | { type: "dev_run_recipe"; recipeId?: string; caseText: string }
-  | { type: "load_reasoning_graph"; graphId: string };
+  | { type: "load_reasoning_graph"; graphId: string }
+  | { type: "adjudicate_graph"; graphId: string; decision: AdjudicationDecision; note?: string };
 
 export type ServerEvent =
   | { type: "graphs"; graphs: { id: string; title?: string; updatedAt?: string; pinned?: boolean }[] }
@@ -258,4 +270,5 @@ export type ServerEvent =
   | { type: "error"; message: string }
   // ADR-0002 Rx — recipe run finished; reasoning graph + server-computed R1 diagnostics.
   | { type: "recipe_run_done"; graphId: string }
-  | { type: "reasoning_graph"; graph: Graph; diagnostics: ReasoningDiagnostic[]; openUncertainties: string[] };
+  | { type: "reasoning_graph"; graph: Graph; diagnostics: ReasoningDiagnostic[]; openUncertainties: string[]; adjudication?: Adjudication }
+  | { type: "adjudication_saved"; graphId: string; adjudication: Adjudication };

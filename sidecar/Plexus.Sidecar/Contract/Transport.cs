@@ -33,7 +33,18 @@ namespace Plexus.Sidecar.Contract;
 [JsonDerivedType(typeof(DeleteProviderEvent), "delete_provider")]
 [JsonDerivedType(typeof(RunRecipeDevEvent), "dev_run_recipe")]
 [JsonDerivedType(typeof(LoadReasoningGraphEvent), "load_reasoning_graph")]
+[JsonDerivedType(typeof(AdjudicateGraphEvent), "adjudicate_graph")]
 public abstract class ClientEvent { }
+
+// ADR-0002 Rx.2.0 — the reviewer records an adjudication over a loaded graph. The
+// timestamp + reviewer are assigned server-side (not trusted from the client); the client
+// sends only the decision and an optional note.
+public sealed class AdjudicateGraphEvent : ClientEvent
+{
+    public string GraphId { get; set; } = "";
+    public string Decision { get; set; } = ""; // "accept" | "reject"
+    public string? Note { get; set; }
+}
 
 // DEV/skeleton trigger (ADR-0002 Rx) — NOT a product flow. Runs a reasoning recipe over
 // raw case text and persists the graph, to prove the engine is reachable from the real
@@ -229,7 +240,17 @@ public sealed class ProviderView
 [JsonDerivedType(typeof(ErrorServerEvent), "error")]
 [JsonDerivedType(typeof(RecipeRunDoneServerEvent), "recipe_run_done")]
 [JsonDerivedType(typeof(ReasoningGraphServerEvent), "reasoning_graph")]
+[JsonDerivedType(typeof(AdjudicationSavedServerEvent), "adjudication_saved")]
 public abstract class ServerEvent { }
+
+// ADR-0002 Rx.2.0 — confirms a persisted adjudication (with its server-assigned reviewer
+// + timestamp). Additive: it carries no graph/diagnostics, because adjudicating never
+// changes them — the client merges this beside the unchanged argument view.
+public sealed class AdjudicationSavedServerEvent : ServerEvent
+{
+    public string GraphId { get; set; } = "";
+    public Adjudication Adjudication { get; set; } = new();
+}
 
 // ADR-0002 Rx — the dev recipe run finished; the graph is persisted under GraphId. No
 // node-by-node streaming (a done event is enough for the skeleton).
@@ -245,6 +266,7 @@ public sealed class ReasoningGraphServerEvent : ServerEvent
     public Graph Graph { get; set; } = new();
     public List<ReasoningDiagnostic> Diagnostics { get; set; } = new();
     public List<string> OpenUncertainties { get; set; } = new();
+    public Adjudication? Adjudication { get; set; } // ADR-0002 Rx.2.0 — the human decision, if one exists; travels with the graph
 }
 
 // Consolidated, secret-free config snapshot for the Settings panel.

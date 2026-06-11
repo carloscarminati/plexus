@@ -62,6 +62,7 @@ function App() {
     deleteProvider,
     reasoning,
     runReasoning,
+    adjudicate,
   } = useSidecar();
   const [draft, setDraft] = useState("");
   const [showSettings, setShowSettings] = useState(false);
@@ -488,7 +489,12 @@ function App() {
       )}
 
       {showReasoning && (
-        <ReasoningDevPanel session={reasoning} onRun={runReasoning} onClose={() => setShowReasoning(false)} />
+        <ReasoningDevPanel
+          session={reasoning}
+          onRun={runReasoning}
+          onAdjudicate={adjudicate}
+          onClose={() => setShowReasoning(false)}
+        />
       )}
 
       {confirm && (
