@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { Graph, Node, Edge, ReasoningDiagnostic, ReasoningRole } from "./contract";
-import { buildArgumentView, reduceReasoning, emptyReasoningSession } from "./reasoning-view";
+import { buildArgumentView, reduceReasoning, emptyReasoningSession, type ArgumentView } from "./reasoning-view";
 
 // ── fixtures ────────────────────────────────────────────────────────────────
 const rnode = (id: string, role: ReasoningRole, raw: string, src?: { kind: string; ref: string }): Node => ({
@@ -101,6 +101,42 @@ describe("buildArgumentView — surfaces what R1 caught", () => {
   it("surfaces an open uncertainty as open", () => {
     const view = buildArgumentView(cleanGraph(), [], ["n3"]);
     expect(view.uncertainties[0].open).toBe(true);
+  });
+});
+
+// ── order-invariance: labels come from the persisted id, not array position ──
+// A signable reference ("cites F1") must be stable across renderings; reordering the
+// persisted nodes must renumber nothing and must not re-aim any cross-reference.
+describe("buildArgumentView — references are id-keyed, not position-keyed", () => {
+  const base = cleanGraph();
+  const reordered: Graph = { ...base, nodes: [...base.nodes].reverse() };
+
+  const labelsById = (v: ArgumentView) =>
+    Object.fromEntries([...v.facts, ...v.hypotheses, ...v.uncertainties].map((x) => [x.id, x.label]));
+
+  it("a reordered node array yields identical labels per node (the gate)", () => {
+    const a = labelsById(buildArgumentView(base, [], []));
+    const b = labelsById(buildArgumentView(reordered, [], []));
+    expect(b).toEqual(a);
+    // concretely: fact n1 is F1 and hypothesis n5 is H2, whatever the array order
+    expect(b["n1"]).toBe("F1");
+    expect(b["n5"]).toBe("H2");
+  });
+
+  it("cross-references resolve to the same nodes after a reorder", () => {
+    const a = buildArgumentView(base, [], []);
+    const b = buildArgumentView(reordered, [], []);
+    expect(b.conclusion!.selects).toBe(a.conclusion!.selects); // "H1"
+    expect(b.conclusion!.cites).toEqual(a.conclusion!.cites); // ["F1"]
+    expect(b.evaluation).toEqual(a.evaluation);
+    expect(b.uncertainties[0].addressedBy).toEqual(a.uncertainties[0].addressedBy); // ["H1","H2"]
+  });
+
+  it("cross-ref integrity: the conclusion cites the fact that bears that label", () => {
+    const v = buildArgumentView(reordered, [], []);
+    const citedLabel = v.conclusion!.cites[0]; // "F1"
+    const cited = v.facts.find((f) => f.label === citedLabel)!;
+    expect(cited.id).toBe("n1"); // the n7 --cites--> n1 edge, and n1 is the fact labelled F1
   });
 });
 

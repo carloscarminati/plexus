@@ -2,7 +2,7 @@
 // of the React component so it's testable: (graph + server-computed R1 diagnostics) →
 // a flat model the view renders. The diagnostics are the system's own (the C# validator),
 // so a flagged conclusion can never be presented as clean.
-import type { ClientEvent, Edge, Graph, Node, ReasoningDiagnostic, ServerEvent } from "./contract";
+import type { ClientEvent, Edge, Graph, ReasoningDiagnostic, ServerEvent } from "./contract";
 
 export interface FactItem {
   id: string;
@@ -54,8 +54,18 @@ export interface ArgumentView {
   diagnostics: ReasoningDiagnostic[]; // all, for a summary banner
 }
 
-const byRole = (nodes: Node[], role: string) => nodes.filter((n) => n.reasoning?.role === role);
 const edgesOfKind = (edges: Edge[], kind: string) => edges.filter((e) => e.kind === kind);
+
+// Total order over a role's nodes by their persisted id (n0, n1, …), independent of the
+// array's ordering — so a label is a function of the id, never of array position. Ids
+// share a textual prefix + numeric suffix; compare the suffix numerically (n2 < n10),
+// falling back to lexical for any id that doesn't fit that shape.
+function stableIdCompare(a: string, b: string): number {
+  const ma = /^(\D*)(\d+)$/.exec(a);
+  const mb = /^(\D*)(\d+)$/.exec(b);
+  if (ma && mb && ma[1] === mb[1]) return Number(ma[2]) - Number(mb[2]);
+  return a < b ? -1 : a > b ? 1 : 0;
+}
 
 export function buildArgumentView(
   graph: Graph,
@@ -65,18 +75,23 @@ export function buildArgumentView(
   const nodeById = new Map(graph.nodes.map((n) => [n.id, n]));
   const diagFor = (id: string) => diagnostics.filter((d) => d.nodeId === id);
 
-  // Assign stable display labels (F1, H1, U1) before resolving relations.
+  // Each role group in stable-id order: labels AND row order are then a deterministic
+  // function of the persisted ids, so a reordered (or reloaded) graph renders identically.
+  const byRole = (role: string) =>
+    graph.nodes.filter((n) => n.reasoning?.role === role).sort((x, y) => stableIdCompare(x.id, y.id));
+
+  // Assign display labels (F1, H1, U1) by id-rank within the role — never by array index.
   const label = new Map<string, string>();
   const labelGroup = (role: string, prefix: string) =>
-    byRole(graph.nodes, role).forEach((n, i) => label.set(n.id, `${prefix}${i + 1}`));
+    byRole(role).forEach((n, i) => label.set(n.id, `${prefix}${i + 1}`));
   labelGroup("fact", "F");
   labelGroup("hypothesis", "H");
   labelGroup("uncertainty", "U");
   const lbl = (id: string) => label.get(id) ?? id;
 
-  const frameNode = byRole(graph.nodes, "frame")[0];
+  const frameNode = byRole("frame")[0];
 
-  const facts: FactItem[] = byRole(graph.nodes, "fact").map((n) => {
+  const facts: FactItem[] = byRole("fact").map((n) => {
     const grounds = graph.edges.find((e) => e.kind === "grounds" && e.from === n.id);
     return {
       id: n.id,
@@ -89,7 +104,7 @@ export function buildArgumentView(
     };
   });
 
-  const uncertainties: UncertaintyItem[] = byRole(graph.nodes, "uncertainty").map((n) => ({
+  const uncertainties: UncertaintyItem[] = byRole("uncertainty").map((n) => ({
     id: n.id,
     label: lbl(n.id),
     text: n.raw,
@@ -98,7 +113,7 @@ export function buildArgumentView(
     diagnostics: diagFor(n.id),
   }));
 
-  const hypotheses: HypothesisItem[] = byRole(graph.nodes, "hypothesis").map((n) => ({
+  const hypotheses: HypothesisItem[] = byRole("hypothesis").map((n) => ({
     id: n.id,
     label: lbl(n.id),
     text: n.raw,
@@ -107,7 +122,7 @@ export function buildArgumentView(
   }));
 
   // Evaluation: per hypothesis, the facts weighed for/against it.
-  const evaluation: EvaluationRow[] = byRole(graph.nodes, "hypothesis")
+  const evaluation: EvaluationRow[] = byRole("hypothesis")
     .map((h) => ({
       hypothesisLabel: lbl(h.id),
       weighings: graph.edges
@@ -116,7 +131,7 @@ export function buildArgumentView(
     }))
     .filter((row) => row.weighings.length > 0);
 
-  const conclNode = byRole(graph.nodes, "conclusion")[0];
+  const conclNode = byRole("conclusion")[0];
   const conclusion: ConclusionItem | undefined = conclNode && {
     id: conclNode.id,
     text: conclNode.raw,
