@@ -45,8 +45,13 @@ public sealed class GraphStore
                 created_at  TEXT NOT NULL,
                 policy_json TEXT
             );
+            -- PK is (graph_id, id), NOT id alone: recipe reasoning node ids (n0, n1, …) are
+            -- graph-LOCAL, so a second persisted recipe graph reuses them — a global id PK
+            -- would trip "UNIQUE constraint failed: nodes.id". Every node query is graph-
+            -- scoped, so per-graph uniqueness is the faithful model (conversation GUIDs are
+            -- unique within a graph trivially). Existing DBs are rebuilt below.
             CREATE TABLE IF NOT EXISTS nodes (
-                id          TEXT PRIMARY KEY,
+                id          TEXT NOT NULL,
                 graph_id    TEXT NOT NULL REFERENCES graphs(id) ON DELETE CASCADE,
                 parent_id   TEXT,
                 role        TEXT NOT NULL,
@@ -54,7 +59,8 @@ public sealed class GraphStore
                 blocks_json TEXT NOT NULL,
                 raw         TEXT NOT NULL,
                 meta_json   TEXT,
-                merge_parents_json TEXT
+                merge_parents_json TEXT,
+                PRIMARY KEY (graph_id, id)
             );
             CREATE INDEX IF NOT EXISTS idx_nodes_graph ON nodes(graph_id);
             -- Semantic reasoning edges (ADR-0002 R2.1). Structural branch/merge edges are
@@ -92,6 +98,53 @@ public sealed class GraphStore
             try { migrate.ExecuteNonQuery(); }
             catch (SqliteException) { /* column already exists */ }
         }
+
+        MigrateNodesToCompositeKey(conn);
+    }
+
+    // Rebuild the nodes table if it still carries the old global `id` PRIMARY KEY, switching
+    // it to a per-graph (graph_id, id) key. Recipe node ids are graph-local; a second recipe
+    // graph reused them and tripped the global PK. Existing rows have no per-graph collisions
+    // (each graph's ids are unique within it), so the copy is lossless. Idempotent: a no-op
+    // once the composite key is in place.
+    private static void MigrateNodesToCompositeKey(SqliteConnection conn)
+    {
+        using (var check = conn.CreateCommand())
+        {
+            check.CommandText = "SELECT sql FROM sqlite_master WHERE type='table' AND name='nodes';";
+            var sql = check.ExecuteScalar() as string ?? "";
+            if (sql.Contains("PRIMARY KEY (graph_id", StringComparison.Ordinal))
+                return; // already migrated (or a fresh DB created with the composite key)
+        }
+
+        using var tx = conn.BeginTransaction();
+        using (var mig = conn.CreateCommand())
+        {
+            mig.Transaction = tx;
+            mig.CommandText = """
+                CREATE TABLE nodes_new (
+                    id          TEXT NOT NULL,
+                    graph_id    TEXT NOT NULL REFERENCES graphs(id) ON DELETE CASCADE,
+                    parent_id   TEXT,
+                    role        TEXT NOT NULL,
+                    created_at  TEXT NOT NULL,
+                    blocks_json TEXT NOT NULL,
+                    raw         TEXT NOT NULL,
+                    meta_json   TEXT,
+                    merge_parents_json TEXT,
+                    kind        TEXT,
+                    reasoning_json TEXT,
+                    PRIMARY KEY (graph_id, id)
+                );
+                INSERT INTO nodes_new (id, graph_id, parent_id, role, created_at, blocks_json, raw, meta_json, merge_parents_json, kind, reasoning_json)
+                    SELECT id, graph_id, parent_id, role, created_at, blocks_json, raw, meta_json, merge_parents_json, kind, reasoning_json FROM nodes;
+                DROP TABLE nodes;
+                ALTER TABLE nodes_new RENAME TO nodes;
+                CREATE INDEX IF NOT EXISTS idx_nodes_graph ON nodes(graph_id);
+                """;
+            mig.ExecuteNonQuery();
+        }
+        tx.Commit();
     }
 
     // Most-recently-active first. "Active" = latest node's createdAt (derived, no
