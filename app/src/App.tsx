@@ -5,6 +5,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { PolicyPicker } from "./PolicyPicker";
 import { GraphSidebar } from "./GraphSidebar";
 import { SettingsModal } from "./SettingsModal";
+import { ReasoningDevPanel } from "./ReasoningDevPanel";
 import { ComposeDrawer } from "./ComposeDrawer";
 import { PlexusLogo } from "./components/PlexusLogo";
 import { blocksToMarkdown } from "./compose/markdown";
@@ -59,9 +60,12 @@ function App() {
     deleteMcpServer,
     setProvider,
     deleteProvider,
+    reasoning,
+    runReasoning,
   } = useSidecar();
   const [draft, setDraft] = useState("");
   const [showSettings, setShowSettings] = useState(false);
+  const [showReasoning, setShowReasoning] = useState(false);
   const [showCompose, setShowCompose] = useState(false);
   // Conversation sidebar collapse — persisted across reloads (localStorage works in
   // the Tauri webview).
@@ -247,6 +251,14 @@ function App() {
             ⊞ Compose{selectedIds.length > 0 ? ` (${selectedIds.length})` : ""}
           </button>
           <div className={`status status-${status}`}>{status}</div>
+          <button
+            className="repo-link reasoning-dev-btn"
+            title="Reasoning (dev) — run a recipe and inspect the argument graph"
+            aria-label="Reasoning (dev)"
+            onClick={() => setShowReasoning(true)}
+          >
+            ⚖ dev
+          </button>
           <button
             className="repo-link"
             title="Settings"
@@ -473,6 +485,10 @@ function App() {
           setProvider={setProvider}
           deleteProvider={deleteProvider}
         />
+      )}
+
+      {showReasoning && (
+        <ReasoningDevPanel session={reasoning} onRun={runReasoning} onClose={() => setShowReasoning(false)} />
       )}
 
       {confirm && (

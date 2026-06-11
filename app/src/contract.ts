@@ -76,12 +76,25 @@ export interface McpUiBlock {
   mimeType: string;
 }
 
+// ADR-0002 reasoning layer (Rx-next). Graph-layer metadata, distinct from render blocks.
+export type ReasoningRole =
+  | "frame" | "fact" | "uncertainty" | "hypothesis" | "evaluation" | "conclusion" | "source";
+
+export interface ReasoningMeta {
+  role?: ReasoningRole;
+  sourceKind?: "doc" | "api" | "given"; // fact provenance kind
+  sourceRef?: string; // fact: the cited source id (resolves to a source node)
+}
+
+export type ReasoningEdgeKind = "grounds" | "addresses" | "supports" | "refutes" | "selects" | "cites";
+
 export interface Node {
   id: string;
   parentId: string | null;
   mergeParents?: string[]; // P2 DAG merge: extra parents beyond parentId
   role: "user" | "assistant";
   kind?: "deliverable"; // X1: a synthesized decision brief — null/absent otherwise
+  reasoning?: ReasoningMeta; // ADR-0002: reasoning role + provenance (null on conversation nodes)
   createdAt: string;
   blocks: Block[];
   raw: string;
@@ -107,12 +120,29 @@ export interface ToolCallRecord {
   approved: boolean;
 }
 
+export interface Edge {
+  from: string;
+  to: string;
+  kind?: ReasoningEdgeKind; // ADR-0002: typed reasoning relation (null = structural branch edge)
+  weight?: number; // supports/refutes magnitude
+}
+
 export interface Graph {
   id: string;
   title?: string;
   nodes: Node[];
-  edges: { from: string; to: string }[];
+  edges: Edge[];
   defaultPolicy?: RoutingPolicy;
+}
+
+// ADR-0002 R1 — a reasoning invariant the system caught on this graph (server-computed).
+export interface ReasoningDiagnostic {
+  severity: "error" | "flag" | "warn";
+  code: string;
+  message: string;
+  nodeId?: string;
+  edgeFrom?: string;
+  edgeTo?: string;
 }
 
 // ── Model routing (R1) ──────────────────────────────────────────────────────
@@ -201,7 +231,10 @@ export type ClientEvent =
   | { type: "set_mcp_server"; server: McpServerView; httpCredential?: string }
   | { type: "delete_mcp_server"; id: string }
   | { type: "set_provider"; provider: ProviderView; apiKey?: string }
-  | { type: "delete_provider"; id: string };
+  | { type: "delete_provider"; id: string }
+  // ADR-0002 Rx (dev): run a reasoning recipe over raw case text; fetch the graph + R1.
+  | { type: "dev_run_recipe"; recipeId?: string; caseText: string }
+  | { type: "load_reasoning_graph"; graphId: string };
 
 export type ServerEvent =
   | { type: "graphs"; graphs: { id: string; title?: string; updatedAt?: string; pinned?: boolean }[] }
@@ -222,4 +255,7 @@ export type ServerEvent =
       readOnly: boolean;
     }
   | ({ type: "settings" } & AppSettingsView)
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+  // ADR-0002 Rx — recipe run finished; reasoning graph + server-computed R1 diagnostics.
+  | { type: "recipe_run_done"; graphId: string }
+  | { type: "reasoning_graph"; graph: Graph; diagnostics: ReasoningDiagnostic[]; openUncertainties: string[] };

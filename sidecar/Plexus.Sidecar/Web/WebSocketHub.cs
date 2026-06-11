@@ -250,6 +250,26 @@ public sealed class WebSocketHub
                 await SendAsync(new RecipeRunDoneServerEvent { GraphId = graphId });
                 break;
             }
+
+            // Fetch a reasoning graph + run R1 server-side, so the audit view shows what
+            // the contract's validator caught (not a re-implementation that could drift).
+            case LoadReasoningGraphEvent lrg:
+            {
+                var rgraph = _store.LoadGraph(lrg.GraphId);
+                if (rgraph is null)
+                {
+                    await SendAsync(new ErrorServerEvent { Message = $"Graph '{lrg.GraphId}' not found." });
+                    break;
+                }
+                var result = ReasoningGraphValidator.Validate(rgraph);
+                await SendAsync(new ReasoningGraphServerEvent
+                {
+                    Graph = rgraph,
+                    Diagnostics = result.Diagnostics.ToList(),
+                    OpenUncertainties = result.OpenUncertainties.ToList(),
+                });
+                break;
+            }
         }
     }
 

@@ -32,6 +32,7 @@ namespace Plexus.Sidecar.Contract;
 [JsonDerivedType(typeof(SetProviderEvent), "set_provider")]
 [JsonDerivedType(typeof(DeleteProviderEvent), "delete_provider")]
 [JsonDerivedType(typeof(RunRecipeDevEvent), "dev_run_recipe")]
+[JsonDerivedType(typeof(LoadReasoningGraphEvent), "load_reasoning_graph")]
 public abstract class ClientEvent { }
 
 // DEV/skeleton trigger (ADR-0002 Rx) — NOT a product flow. Runs a reasoning recipe over
@@ -43,6 +44,14 @@ public sealed class RunRecipeDevEvent : ClientEvent
 {
     public string? RecipeId { get; set; } // null/empty = investigator
     public string CaseText { get; set; } = "";
+}
+
+// ADR-0002 Rx-next — fetch a reasoning graph by id WITH its R1 diagnostics, computed
+// server-side (the single source of truth — the same ReasoningGraphValidator that
+// enforces the contract) so the audit view renders exactly what the system caught.
+public sealed class LoadReasoningGraphEvent : ClientEvent
+{
+    public string GraphId { get; set; } = "";
 }
 
 public sealed class LoadGraphEvent : ClientEvent
@@ -219,6 +228,7 @@ public sealed class ProviderView
 [JsonDerivedType(typeof(SettingsServerEvent), "settings")]
 [JsonDerivedType(typeof(ErrorServerEvent), "error")]
 [JsonDerivedType(typeof(RecipeRunDoneServerEvent), "recipe_run_done")]
+[JsonDerivedType(typeof(ReasoningGraphServerEvent), "reasoning_graph")]
 public abstract class ServerEvent { }
 
 // ADR-0002 Rx — the dev recipe run finished; the graph is persisted under GraphId. No
@@ -226,6 +236,15 @@ public abstract class ServerEvent { }
 public sealed class RecipeRunDoneServerEvent : ServerEvent
 {
     public string GraphId { get; set; } = "";
+}
+
+// The reasoning graph + the R1 diagnostics it currently fails/flags (server-computed),
+// so the audit view shows what the system caught — a flagged conclusion never renders clean.
+public sealed class ReasoningGraphServerEvent : ServerEvent
+{
+    public Graph Graph { get; set; } = new();
+    public List<ReasoningDiagnostic> Diagnostics { get; set; } = new();
+    public List<string> OpenUncertainties { get; set; } = new();
 }
 
 // Consolidated, secret-free config snapshot for the Settings panel.

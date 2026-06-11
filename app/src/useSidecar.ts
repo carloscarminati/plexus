@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AppSettingsView, ClientEvent, Graph, McpServerView, ModelInfo, ProviderView, RoutingPolicy, ServerEvent } from "./contract";
+import { emptyReasoningSession, type ReasoningSession } from "./reasoning-view";
 
 const SIDECAR_URL = "ws://127.0.0.1:8765/ws";
 
@@ -29,6 +30,8 @@ export function useSidecar() {
   const [graphs, setGraphs] = useState<GraphSummary[]>([]);
   // Consolidated app config for the Settings panel (null until first snapshot).
   const [settings, setSettings] = useState<AppSettingsView | null>(null);
+  // ADR-0002 Rx (dev): the reasoning-recipe run + loaded argument graph.
+  const [reasoning, setReasoning] = useState<ReasoningSession>(emptyReasoningSession);
   const socketRef = useRef<WebSocket | null>(null);
   // Latest active graph id, readable inside the socket handler without stale closures.
   const activeIdRef = useRef<string | null>(null);
@@ -110,6 +113,15 @@ export function useSidecar() {
           setError(msg.message);
           setPending(null);
           setConfirm(null); // a cancelled/timed-out turn clears any open confirmation
+          setReasoning((r) => (r.status === "running" || r.status === "loading" ? { ...r, status: "error", error: msg.message } : r));
+          break;
+        // ADR-0002 Rx (dev): recipe run finished → fetch its graph + R1; then render.
+        case "recipe_run_done":
+          send({ type: "load_reasoning_graph", graphId: msg.graphId });
+          setReasoning((r) => ({ ...r, status: "loading" }));
+          break;
+        case "reasoning_graph":
+          setReasoning({ status: "ready", graph: msg.graph, diagnostics: msg.diagnostics, openUncertainties: msg.openUncertainties });
           break;
       }
     };
@@ -213,6 +225,11 @@ export function useSidecar() {
     [send],
   );
   const deleteProvider = useCallback((id: string) => send({ type: "delete_provider", id }), [send]);
+  // ADR-0002 Rx (dev): trigger a reasoning-recipe run over raw case text.
+  const runReasoning = useCallback((caseText: string) => {
+    setReasoning({ ...emptyReasoningSession, status: "running" });
+    send({ type: "dev_run_recipe", caseText });
+  }, [send]);
 
   // Click a node: plain click selects only it; shift/cmd-click toggles it in the
   // set (for a DAG merge of ≥2 nodes).
@@ -340,5 +357,7 @@ export function useSidecar() {
     deleteMcpServer,
     setProvider,
     deleteProvider,
+    reasoning,
+    runReasoning,
   };
 }

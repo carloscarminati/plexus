@@ -1,0 +1,125 @@
+import { describe, it, expect } from "vitest";
+import type { Graph, Node, Edge, ReasoningDiagnostic, ReasoningRole } from "./contract";
+import { buildArgumentView, reduceReasoning, emptyReasoningSession } from "./reasoning-view";
+
+// ── fixtures ────────────────────────────────────────────────────────────────
+const rnode = (id: string, role: ReasoningRole, raw: string, src?: { kind: string; ref: string }): Node => ({
+  id,
+  parentId: null,
+  role: "assistant",
+  reasoning: { role, sourceKind: src?.kind as never, sourceRef: src?.ref },
+  createdAt: id,
+  blocks: [],
+  raw,
+});
+const e = (from: string, to: string, kind: Edge["kind"], weight?: number): Edge => ({ from, to, kind, weight });
+
+// A sound investigator graph: facts grounded, uncertainty addressed, conclusion selects
+// a net-positive hypothesis and cites a fact.
+function cleanGraph(): Graph {
+  return {
+    id: "g",
+    nodes: [
+      rnode("n0", "frame", "Why did the engine fail?"),
+      rnode("n1", "fact", "Engine ran over its rev limit.", { kind: "doc", ref: "s1" }),
+      rnode("n2", "fact", "Lubrication dropped and a bearing spun.", { kind: "api", ref: "s2" }),
+      rnode("n3", "uncertainty", "Was the rev limit alarmed?"),
+      rnode("n4", "hypothesis", "Operational over-demand"),
+      rnode("n5", "hypothesis", "Lubrication system fault"),
+      rnode("n6", "evaluation", "Evaluation"),
+      rnode("n7", "conclusion", "Operational over-demand is the cause."),
+      rnode("s1", "source", "Control: over-revving causes bearing wear."),
+      rnode("s2", "source", "Maintenance API: lubrication pressure log."),
+    ],
+    edges: [
+      e("n1", "s1", "grounds"),
+      e("n2", "s2", "grounds"),
+      e("n4", "n3", "addresses"),
+      e("n5", "n3", "addresses"),
+      e("n1", "n4", "supports", 0.8),
+      e("n2", "n5", "refutes", 0.3),
+      e("n7", "n4", "selects"),
+      e("n7", "n1", "cites"),
+    ],
+  };
+}
+
+const flag: ReasoningDiagnostic = {
+  severity: "flag",
+  code: "conclusion_net_negative",
+  message: "Conclusion selects a net-negative hypothesis.",
+  nodeId: "n7",
+};
+
+// ── render: clean ───────────────────────────────────────────────────────────
+describe("buildArgumentView — clean graph", () => {
+  const view = buildArgumentView(cleanGraph(), [], []);
+
+  it("renders the six role groups in reasoning order", () => {
+    expect(view.frame?.text).toContain("Why did the engine fail");
+    expect(view.facts).toHaveLength(2);
+    expect(view.uncertainties).toHaveLength(1);
+    expect(view.hypotheses).toHaveLength(2);
+    expect(view.evaluation).toHaveLength(2);
+    expect(view.conclusion).toBeDefined();
+  });
+
+  it("shows facts with their grounding (derived from source_ref)", () => {
+    const f1 = view.facts[0];
+    expect(f1.label).toBe("F1");
+    expect(f1.sourceKind).toBe("doc");
+    expect(f1.sourceText).toContain("over-revving causes bearing wear");
+  });
+
+  it("shows the evaluation per hypothesis (supports/refutes with weight)", () => {
+    const h1 = view.evaluation.find((r) => r.hypothesisLabel === "H1")!;
+    expect(h1.weighings).toEqual([{ factLabel: "F1", stance: "supports", weight: 0.8 }]);
+  });
+
+  it("shows the conclusion selection + citations, and the addressed uncertainty", () => {
+    expect(view.conclusion!.selects).toBe("H1");
+    expect(view.conclusion!.cites).toEqual(["F1"]);
+    expect(view.uncertainties[0].open).toBe(false);
+    expect(view.uncertainties[0].addressedBy).toEqual(["H1", "H2"]);
+    expect(view.conclusion!.diagnostics).toHaveLength(0);
+  });
+});
+
+// ── render: the flag (the important one) ────────────────────────────────────
+describe("buildArgumentView — surfaces what R1 caught", () => {
+  it("renders a net-negative flag visibly on the conclusion", () => {
+    const view = buildArgumentView(cleanGraph(), [flag], []);
+    expect(view.conclusion!.diagnostics).toHaveLength(1);
+    expect(view.conclusion!.diagnostics[0].code).toBe("conclusion_net_negative");
+  });
+
+  it("a clean graph carries no flag on the conclusion", () => {
+    const view = buildArgumentView(cleanGraph(), [], []);
+    expect(view.conclusion!.diagnostics).toHaveLength(0);
+  });
+
+  it("surfaces an open uncertainty as open", () => {
+    const view = buildArgumentView(cleanGraph(), [], ["n3"]);
+    expect(view.uncertainties[0].open).toBe(true);
+  });
+});
+
+// ── drive round-trip (mocked WS as a pure event flow) ───────────────────────
+describe("reduceReasoning — dev round-trip", () => {
+  it("run → done → fetch → ready, then renders", () => {
+    const afterDone = reduceReasoning({ ...emptyReasoningSession, status: "running" }, { type: "recipe_run_done", graphId: "g1" });
+    expect(afterDone.send).toEqual({ type: "load_reasoning_graph", graphId: "g1" });
+    expect(afterDone.session.status).toBe("loading");
+
+    const afterGraph = reduceReasoning(afterDone.session, {
+      type: "reasoning_graph",
+      graph: cleanGraph(),
+      diagnostics: [flag],
+      openUncertainties: [],
+    });
+    expect(afterGraph.session.status).toBe("ready");
+
+    const view = buildArgumentView(afterGraph.session.graph!, afterGraph.session.diagnostics, afterGraph.session.openUncertainties);
+    expect(view.conclusion!.diagnostics[0].code).toBe("conclusion_net_negative");
+  });
+});
