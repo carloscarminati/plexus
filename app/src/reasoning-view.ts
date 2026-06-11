@@ -89,6 +89,14 @@ export function buildArgumentView(
   labelGroup("uncertainty", "U");
   const lbl = (id: string) => label.get(id) ?? id;
 
+  // F4: prose carries persisted node ids (canonicalized at persist); rewrite each whole-word
+  // id token to its display label, reusing the SAME id→label map the edges use — so prose
+  // and edges show one label per node. An id with no label (or any other token) is left as-is.
+  const proseRe = label.size
+    ? new RegExp("\\b(?:" + [...label.keys()].map((k) => k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") + ")\\b", "g")
+    : null;
+  const relabel = (text: string) => (proseRe ? text.replace(proseRe, (t) => label.get(t) ?? t) : text);
+
   const frameNode = byRole("frame")[0];
 
   const facts: FactItem[] = byRole("fact").map((n) => {
@@ -96,7 +104,7 @@ export function buildArgumentView(
     return {
       id: n.id,
       label: lbl(n.id),
-      text: n.raw,
+      text: relabel(n.raw),
       sourceKind: n.reasoning?.sourceKind,
       sourceRef: n.reasoning?.sourceRef,
       sourceText: grounds ? nodeById.get(grounds.to)?.raw : undefined,
@@ -107,7 +115,7 @@ export function buildArgumentView(
   const uncertainties: UncertaintyItem[] = byRole("uncertainty").map((n) => ({
     id: n.id,
     label: lbl(n.id),
-    text: n.raw,
+    text: relabel(n.raw),
     open: openUncertainties.includes(n.id),
     addressedBy: edgesOfKind(graph.edges, "addresses").filter((e) => e.to === n.id).map((e) => lbl(e.from)),
     diagnostics: diagFor(n.id),
@@ -116,7 +124,7 @@ export function buildArgumentView(
   const hypotheses: HypothesisItem[] = byRole("hypothesis").map((n) => ({
     id: n.id,
     label: lbl(n.id),
-    text: n.raw,
+    text: relabel(n.raw),
     addresses: edgesOfKind(graph.edges, "addresses").filter((e) => e.from === n.id).map((e) => lbl(e.to)),
     diagnostics: diagFor(n.id),
   }));
@@ -134,14 +142,14 @@ export function buildArgumentView(
   const conclNode = byRole("conclusion")[0];
   const conclusion: ConclusionItem | undefined = conclNode && {
     id: conclNode.id,
-    text: conclNode.raw,
+    text: relabel(conclNode.raw),
     selects: graph.edges.filter((e) => e.kind === "selects" && e.from === conclNode.id).map((e) => lbl(e.to))[0],
     cites: edgesOfKind(graph.edges, "cites").filter((e) => e.from === conclNode.id).map((e) => lbl(e.to)),
     diagnostics: diagFor(conclNode.id),
   };
 
   return {
-    frame: frameNode && { id: frameNode.id, text: frameNode.raw },
+    frame: frameNode && { id: frameNode.id, text: relabel(frameNode.raw) },
     facts,
     uncertainties,
     hypotheses,

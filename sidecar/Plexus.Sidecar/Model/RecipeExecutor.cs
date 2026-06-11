@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using Json.Schema;
 using Microsoft.Extensions.AI;
 using Plexus.Sidecar.Contract;
@@ -96,7 +97,34 @@ public static class RecipeExecutor
             ? Array.Empty<string>()
             : await EscalateContestedAsync(client, recipe, escalateModelId, context, state, reports, fidelityJudge, maxAttempts, ct);
 
+        // F4: rewrite the model's ref tokens in the prose to persisted ids, while the map
+        // is still alive — so the persisted prose and the edges live in ONE namespace.
+        CanonicalizeProse(state.Graph.Nodes, state.RefToId);
+
         return new RecipeRunResult(true, state.Graph, Steps: reports, EscalatedSteps: escalated);
+    }
+
+    // F4 — canonicalize the reference namespace. During the run the model wrote prose using
+    // ITS ref tokens (f0/h1/u2); that ref→id map is discarded at persist, so a later render
+    // can't resolve them and they collide with the edge labels (which key on the persisted
+    // id, per F1). While the map is still alive, rewrite each node's prose so a ref token
+    // becomes the PERSISTED node id — then prose and edges share one namespace and the
+    // render maps id→label for both. Whole-word match on the map's keys (longest-first, so
+    // f1 never matches inside f10); a token not in the map is free text, left untouched.
+    internal static void CanonicalizeProse(IEnumerable<Node> nodes, IReadOnlyDictionary<string, string> refToId)
+    {
+        if (refToId.Count == 0)
+            return;
+        var keys = refToId.Keys.OrderByDescending(k => k.Length).Select(Regex.Escape);
+        var pattern = new Regex(@"\b(?:" + string.Join("|", keys) + @")\b");
+        string Rewrite(string s) => pattern.Replace(s, m => refToId[m.Value]);
+        foreach (var node in nodes)
+        {
+            node.Raw = Rewrite(node.Raw);
+            foreach (var block in node.Blocks)
+                if (block is MarkdownBlock md)
+                    md.Text = Rewrite(md.Text);
+        }
     }
 
     // ADR-0002 per-node escalate: when R1 flags the small-model graph, re-run the

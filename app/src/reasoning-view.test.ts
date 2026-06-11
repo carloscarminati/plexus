@@ -140,6 +140,33 @@ describe("buildArgumentView — references are id-keyed, not position-keyed", ()
   });
 });
 
+// ── prose relabel (F4): prose ids → the same labels the edges use ────────────
+describe("buildArgumentView — prose and edges share one namespace", () => {
+  it("relabels persisted-id tokens in prose to their display labels (the gate)", () => {
+    const g = cleanGraph();
+    const concl = g.nodes.find((n) => n.reasoning?.role === "conclusion")!;
+    // canonicalized prose: persisted ids (n4 = a hypothesis, n1 = a fact, n5 = the rival).
+    concl.raw = "n4 is the cause, supported by n1; rival n5 dropped; see n99.";
+
+    const v = buildArgumentView(g, [], []);
+
+    // prose uses F1/H1/H2 — the SAME labels the edges resolve to.
+    expect(v.conclusion!.text).toBe("H1 is the cause, supported by F1; rival H2 dropped; see n99.");
+    expect(v.conclusion!.selects).toBe("H1"); // edge n7→n4
+    expect(v.conclusion!.cites).toEqual(["F1"]); // edge n7→n1
+    // the prose label for the selected hypothesis matches the edge's label — no "h1/H2" split
+    expect(v.conclusion!.text).toContain(v.conclusion!.selects!);
+  });
+
+  it("leaves an unmapped id token intact", () => {
+    const g = cleanGraph();
+    const concl = g.nodes.find((n) => n.reasoning?.role === "conclusion")!;
+    concl.raw = "n99 has no label here.";
+    const v = buildArgumentView(g, [], []);
+    expect(v.conclusion!.text).toBe("n99 has no label here."); // untouched
+  });
+});
+
 // ── drive round-trip (mocked WS as a pure event flow) ───────────────────────
 describe("reduceReasoning — dev round-trip", () => {
   it("run → done → fetch → ready, then renders", () => {
