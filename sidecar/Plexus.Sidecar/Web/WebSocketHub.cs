@@ -23,6 +23,7 @@ public sealed class WebSocketHub
     private readonly SettingsStore _settings;
     private readonly KeychainService _keychain;
     private readonly Mcp.McpHost _mcp;
+    private readonly RecipeRunner _recipeRunner;
     private readonly ILogger _log;
     // Pending MCP tool confirmations, keyed by tool_use id (M0 §3.2). The turn
     // runs in the background and awaits these; the receive loop resolves them.
@@ -38,7 +39,7 @@ public sealed class WebSocketHub
 
     public WebSocketHub(
         WebSocket socket, GraphStore store, ConversationService conversation, ModelRegistry registry,
-        SettingsStore settings, KeychainService keychain, Mcp.McpHost mcp, ILogger log)
+        SettingsStore settings, KeychainService keychain, Mcp.McpHost mcp, RecipeRunner recipeRunner, ILogger log)
     {
         _socket = socket;
         _store = store;
@@ -47,6 +48,7 @@ public sealed class WebSocketHub
         _settings = settings;
         _keychain = keychain;
         _mcp = mcp;
+        _recipeRunner = recipeRunner;
         _log = log;
     }
 
@@ -237,6 +239,17 @@ public sealed class WebSocketHub
             case DeleteProviderEvent dpr:
                 await HandleDeleteProviderAsync(dpr.Id);
                 break;
+
+            // ADR-0002 Rx (dev/skeleton): run a recipe over raw case text and persist the
+            // graph via the real path. A malformed request throws before any graph is
+            // created (RecipeRunner validates first), so the catch in RunAsync emits an
+            // ErrorServerEvent with no partial graph persisted.
+            case RunRecipeDevEvent dev:
+            {
+                var graphId = await _recipeRunner.RunAndPersistAsync(dev.RecipeId, dev.CaseText, ct);
+                await SendAsync(new RecipeRunDoneServerEvent { GraphId = graphId });
+                break;
+            }
         }
     }
 

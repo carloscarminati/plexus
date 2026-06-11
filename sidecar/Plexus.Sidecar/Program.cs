@@ -43,6 +43,12 @@ builder.Services.AddSingleton<ChatClientFactory>();
 builder.Services.AddSingleton<ChatTurnService>();
 builder.Services.AddSingleton<ConversationService>();
 
+// ADR-0002 Rx (dev/skeleton): a recipe runner reachable from the WS surface. The chat
+// client is a factory delegate so the dev trigger uses the real provider; tests stub it.
+builder.Services.AddSingleton<Func<Microsoft.Extensions.AI.IChatClient>>(sp =>
+    () => sp.GetRequiredService<ChatClientFactory>().For("anthropic", "claude-haiku-4-5"));
+builder.Services.AddSingleton<RecipeRunner>();
+
 var app = builder.Build();
 app.UseWebSockets();
 
@@ -69,6 +75,7 @@ app.Map("/ws", async (HttpContext context) =>
         context.RequestServices.GetRequiredService<SettingsStore>(),
         context.RequestServices.GetRequiredService<KeychainService>(),
         context.RequestServices.GetRequiredService<McpHost>(),
+        context.RequestServices.GetRequiredService<RecipeRunner>(),
         logger);
     await hub.RunAsync(context.RequestAborted);
 });

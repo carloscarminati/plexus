@@ -222,6 +222,66 @@ public sealed class GraphStore
         return graph;
     }
 
+    // Persist a freshly-produced graph ATOMICALLY (ADR-0002 Rx): the graph row, all its
+    // nodes, and its semantic edges go in within ONE transaction — a db failure mid-write
+    // rolls back to nothing, never a partial/orphaned graph. (The caller runs the recipe to
+    // completion in memory first; this is the all-or-nothing commit.) Structural and grounds
+    // edges are not stored (derived on load), matching the R2.1/R2.2 consistency model.
+    public string PersistGraph(Graph graph, string? title)
+    {
+        var id = Guid.NewGuid().ToString("n");
+        using var conn = Open();
+        using var tx = conn.BeginTransaction();
+
+        using (var g = conn.CreateCommand())
+        {
+            g.CommandText = "INSERT INTO graphs (id, title, created_at, policy_json) VALUES ($id, $title, $createdAt, $policy);";
+            g.Parameters.AddWithValue("$id", id);
+            g.Parameters.AddWithValue("$title", (object?)title ?? DBNull.Value);
+            g.Parameters.AddWithValue("$createdAt", DateTimeOffset.UtcNow.ToString("o"));
+            g.Parameters.AddWithValue("$policy", PlexusJson.Serialize(RoutingPolicy.Manual("claude-opus-4-8")));
+            g.ExecuteNonQuery();
+        }
+
+        foreach (var node in graph.Nodes)
+        {
+            using var n = conn.CreateCommand();
+            n.CommandText = """
+                INSERT INTO nodes (id, graph_id, parent_id, role, created_at, blocks_json, raw, meta_json, merge_parents_json, kind, reasoning_json)
+                VALUES ($id, $gid, $parent, $role, $createdAt, $blocks, $raw, $meta, $merge, $kind, $reasoning);
+                """;
+            n.Parameters.AddWithValue("$id", node.Id);
+            n.Parameters.AddWithValue("$gid", id);
+            n.Parameters.AddWithValue("$parent", (object?)node.ParentId ?? DBNull.Value);
+            n.Parameters.AddWithValue("$role", node.Role);
+            n.Parameters.AddWithValue("$kind", (object?)node.Kind ?? DBNull.Value);
+            n.Parameters.AddWithValue("$createdAt", node.CreatedAt);
+            n.Parameters.AddWithValue("$blocks", PlexusJson.Serialize(node.Blocks));
+            n.Parameters.AddWithValue("$raw", node.Raw);
+            n.Parameters.AddWithValue("$meta", node.Meta is null ? DBNull.Value : PlexusJson.Serialize(node.Meta));
+            n.Parameters.AddWithValue("$merge", node.MergeParents is null ? DBNull.Value : PlexusJson.Serialize(node.MergeParents));
+            n.Parameters.AddWithValue("$reasoning", node.Reasoning is null ? DBNull.Value : PlexusJson.Serialize(node.Reasoning));
+            n.ExecuteNonQuery();
+        }
+
+        foreach (var e in graph.Edges)
+        {
+            if (e.Kind is null || e.Kind == Contract.ReasoningEdges.Grounds)
+                continue; // structural / grounds — derived on load, not stored
+            using var ed = conn.CreateCommand();
+            ed.CommandText = "INSERT INTO edges (graph_id, from_id, to_id, kind, weight) VALUES ($gid, $from, $to, $kind, $weight);";
+            ed.Parameters.AddWithValue("$gid", id);
+            ed.Parameters.AddWithValue("$from", e.From);
+            ed.Parameters.AddWithValue("$to", e.To);
+            ed.Parameters.AddWithValue("$kind", e.Kind);
+            ed.Parameters.AddWithValue("$weight", (object?)e.Weight ?? DBNull.Value);
+            ed.ExecuteNonQuery();
+        }
+
+        tx.Commit();
+        return id;
+    }
+
     public void SetGraphPolicy(string graphId, RoutingPolicy policy)
     {
         using var conn = Open();

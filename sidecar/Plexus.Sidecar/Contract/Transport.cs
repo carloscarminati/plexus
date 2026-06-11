@@ -31,7 +31,19 @@ namespace Plexus.Sidecar.Contract;
 [JsonDerivedType(typeof(DeleteMcpServerEvent), "delete_mcp_server")]
 [JsonDerivedType(typeof(SetProviderEvent), "set_provider")]
 [JsonDerivedType(typeof(DeleteProviderEvent), "delete_provider")]
+[JsonDerivedType(typeof(RunRecipeDevEvent), "dev_run_recipe")]
 public abstract class ClientEvent { }
+
+// DEV/skeleton trigger (ADR-0002 Rx) — NOT a product flow. Runs a reasoning recipe over
+// raw case text and persists the graph, to prove the engine is reachable from the real
+// event+persistence surface. Deliberately decoupled: raw caseText only (no conversation-
+// node linkage — how the two graph layers relate is a later decision), mock grounding.
+// The "dev_" discriminator marks it; it must not be wired into any user flow.
+public sealed class RunRecipeDevEvent : ClientEvent
+{
+    public string? RecipeId { get; set; } // null/empty = investigator
+    public string CaseText { get; set; } = "";
+}
 
 public sealed class LoadGraphEvent : ClientEvent
 {
@@ -206,7 +218,15 @@ public sealed class ProviderView
 [JsonDerivedType(typeof(ToolConfirmationRequestServerEvent), "tool_confirmation_request")]
 [JsonDerivedType(typeof(SettingsServerEvent), "settings")]
 [JsonDerivedType(typeof(ErrorServerEvent), "error")]
+[JsonDerivedType(typeof(RecipeRunDoneServerEvent), "recipe_run_done")]
 public abstract class ServerEvent { }
+
+// ADR-0002 Rx — the dev recipe run finished; the graph is persisted under GraphId. No
+// node-by-node streaming (a done event is enough for the skeleton).
+public sealed class RecipeRunDoneServerEvent : ServerEvent
+{
+    public string GraphId { get; set; } = "";
+}
 
 // Consolidated, secret-free config snapshot for the Settings panel.
 public sealed class SettingsServerEvent : ServerEvent
