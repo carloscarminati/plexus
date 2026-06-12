@@ -230,6 +230,90 @@ public class ReasoningGraphValidatorTests
         Assert.Empty(r.Diagnostics); // f1 weighed (refutes hs), hs net-positive, both facts grounded
     }
 
+    // ── invariant 6 (warn): selection diverges from the weight argmax ───────
+    // The selection is an independent emission; when it isn't the best-weighted hypothesis,
+    // surface it (don't force the argmax). Reuses the net-negative net computation.
+    [Fact]
+    public void SelectionNotArgmax_RaisesWarn_NamingSelectedAndBestWithNets()
+    {
+        // two hypotheses, both net-positive (no flag); the selection picks the lower-net one.
+        var nodes = new[] { N("e1"), N("e2"), R("h1", ReasoningRoles.Hypothesis), R("h2", ReasoningRoles.Hypothesis), R("c", ReasoningRoles.Conclusion) };
+        var edges = new[]
+        {
+            E("e1", "h1", ReasoningEdges.Supports, 0.5), // net h1 = 0.5
+            E("e2", "h2", ReasoningEdges.Supports, 0.9), // net h2 = 0.9  ← argmax
+            E("c", "h1", ReasoningEdges.Selects),         // selects the lower-weighted
+        };
+
+        var r = ReasoningGraphValidator.Validate(G(nodes, edges));
+
+        var d = Assert.Single(r.Diagnostics);
+        Assert.Equal(ReasoningSeverity.Warn, d.Severity);
+        Assert.Equal(ReasoningDiagnosticCodes.SelectionNotBestWeighted, d.Code);
+        Assert.Equal("c", d.NodeId);
+        Assert.Equal("h1", d.EdgeTo);          // the selected hypothesis
+        Assert.Contains("h1", d.Message);      // names both, by id (render relabels to H1/H2)
+        Assert.Contains("h2", d.Message);
+        Assert.Contains("0.5", d.Message);     // with their nets
+        Assert.Contains("0.9", d.Message);
+        Assert.False(r.HasFlags);              // warn tier — not a flag
+    }
+
+    [Fact]
+    public void SelectionIsArgmax_NoWarn()
+    {
+        var nodes = new[] { N("e1"), N("e2"), R("h1", ReasoningRoles.Hypothesis), R("h2", ReasoningRoles.Hypothesis), R("c", ReasoningRoles.Conclusion) };
+        var edges = new[]
+        {
+            E("e1", "h1", ReasoningEdges.Supports, 0.5),
+            E("e2", "h2", ReasoningEdges.Supports, 0.9),
+            E("c", "h2", ReasoningEdges.Selects), // selects the argmax
+        };
+
+        var r = ReasoningGraphValidator.Validate(G(nodes, edges));
+
+        Assert.DoesNotContain(r.Diagnostics, d => d.Code == ReasoningDiagnosticCodes.SelectionNotBestWeighted);
+        Assert.Empty(r.Diagnostics);
+    }
+
+    [Fact]
+    public void SelectionTiedWithBest_NoWarn()
+    {
+        // both net 0.7 → the selected one is tied with the max → no warn (epsilon guard).
+        var nodes = new[] { N("e1"), N("e2"), R("h1", ReasoningRoles.Hypothesis), R("h2", ReasoningRoles.Hypothesis), R("c", ReasoningRoles.Conclusion) };
+        var edges = new[]
+        {
+            E("e1", "h1", ReasoningEdges.Supports, 0.7),
+            E("e2", "h2", ReasoningEdges.Supports, 0.7),
+            E("c", "h1", ReasoningEdges.Selects),
+        };
+
+        var r = ReasoningGraphValidator.Validate(G(nodes, edges));
+
+        Assert.DoesNotContain(r.Diagnostics, d => d.Code == ReasoningDiagnosticCodes.SelectionNotBestWeighted);
+    }
+
+    // Additive: a net-negative AND off-argmax selection raises BOTH, independently — the
+    // net-negative flag is byte-identical to before (same computation, reused), plus the warn.
+    [Fact]
+    public void NetNegativeAndOffArgmax_BothFire_Independently()
+    {
+        var nodes = new[] { N("e1"), N("e2"), N("e3"), R("h1", ReasoningRoles.Hypothesis), R("h2", ReasoningRoles.Hypothesis), R("c", ReasoningRoles.Conclusion) };
+        var edges = new[]
+        {
+            E("e1", "h1", ReasoningEdges.Refutes, 0.9),  // net h1 = 0.2 − 0.9 = −0.7 (net-negative)
+            E("e2", "h1", ReasoningEdges.Supports, 0.2),
+            E("e3", "h2", ReasoningEdges.Supports, 0.5), // net h2 = 0.5  ← argmax
+            E("c", "h1", ReasoningEdges.Selects),         // selects the net-negative, off-argmax one
+        };
+
+        var r = ReasoningGraphValidator.Validate(G(nodes, edges));
+
+        Assert.Contains(r.Diagnostics, d => d.Code == ReasoningDiagnosticCodes.ConclusionNetNegative && d.NodeId == "c");
+        Assert.Contains(r.Diagnostics, d => d.Code == ReasoningDiagnosticCodes.SelectionNotBestWeighted && d.NodeId == "c");
+        Assert.True(r.HasFlags); // the flag still fires — the new warn is purely additive
+    }
+
     // ── backward-compat: a legacy conversation graph is a clean no-op ───────
     [Fact]
     public void LegacyGraph_NoReasoningRoles_IsNoOp()

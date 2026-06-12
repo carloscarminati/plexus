@@ -13,7 +13,7 @@ public static class ReasoningSeverity
 {
     public const string Error = "error"; // invalid: must be fixed (provenance)
     public const string Flag = "flag";   // contested: surface for escalate (net-negative selection)
-    public const string Warn = "warn";   // suspicious: dangling hypothesis, unweighed citation
+    public const string Warn = "warn";   // suspicious: dangling hypothesis, unweighed citation, off-argmax selection
 }
 
 // Diagnostic codes — stable identifiers for each invariant.
@@ -23,6 +23,7 @@ public static class ReasoningDiagnosticCodes
     public const string ConclusionNetNegative = "conclusion_net_negative";
     public const string HypothesisDangling = "hypothesis_dangling";
     public const string CitationNotWeighed = "citation_not_weighed";
+    public const string SelectionNotBestWeighted = "selection_not_best_weighted";
 }
 
 // One finding, tagged with severity, a stable code, and the offending node (and/or
@@ -74,6 +75,7 @@ public static class ReasoningGraphValidator
                 case ReasoningRoles.Conclusion:
                     CheckSelectedNetEvidence(node, edges, result);
                     CheckCitationsWeighed(node, edges, result);
+                    CheckSelectionBestWeighted(node, graph.Nodes, edges, result);
                     break;
             }
         }
@@ -96,6 +98,21 @@ public static class ReasoningGraphValidator
                 $"Fact '{fact.Id}' has no source_ref.", NodeId: fact.Id));
     }
 
+    // The net evidence on a hypothesis: Σ supports − Σ refutes, by magnitude, over the
+    // edges incident TO it. The SINGLE source of this computation — both the net-negative
+    // flag (invariant 2) and the off-argmax warn (invariant 6) call it, so the two
+    // invariants can never drift on how "net" or edge direction is read.
+    private static double NetEvidence(string hypothesisId, List<Edge> edges)
+    {
+        var net = 0.0;
+        foreach (var e in edges.Where(e => e.To == hypothesisId))
+        {
+            if (e.Kind == ReasoningEdges.Supports) net += Math.Abs(e.Weight ?? 0);
+            else if (e.Kind == ReasoningEdges.Refutes) net -= Math.Abs(e.Weight ?? 0);
+        }
+        return net;
+    }
+
     // Invariant 2 (flag): a conclusion that `selects` a hypothesis whose net evidence
     // (Σ supports − Σ refutes, by magnitude) is negative is contested → flag it.
     private static void CheckSelectedNetEvidence(Node conclusion, List<Edge> edges, ReasoningValidationResult result)
@@ -103,18 +120,51 @@ public static class ReasoningGraphValidator
         foreach (var sel in edges.Where(e => e.Kind == ReasoningEdges.Selects && e.From == conclusion.Id))
         {
             var hypothesisId = sel.To;
-            var net = 0.0;
-            foreach (var e in edges.Where(e => e.To == hypothesisId))
-            {
-                if (e.Kind == ReasoningEdges.Supports) net += Math.Abs(e.Weight ?? 0);
-                else if (e.Kind == ReasoningEdges.Refutes) net -= Math.Abs(e.Weight ?? 0);
-            }
+            var net = NetEvidence(hypothesisId, edges);
 
             if (net < 0)
                 result.Diagnostics.Add(new ReasoningDiagnostic(
                     ReasoningSeverity.Flag, ReasoningDiagnosticCodes.ConclusionNetNegative,
                     $"Conclusion '{conclusion.Id}' selects hypothesis '{hypothesisId}' with net-negative evidence ({net:0.##}).",
                     NodeId: conclusion.Id, EdgeFrom: conclusion.Id, EdgeTo: hypothesisId));
+        }
+    }
+
+    // Invariant 6 (warn): the selected hypothesis is not the best-weighted one. The
+    // selection is an independent model emission (constrained only to a non-net-negative
+    // hypothesis by invariant 2); when it diverges from the weight argmax, the verdict no
+    // longer "derives from the weights". This SURFACES that divergence — it does not force
+    // the argmax (a follow-up, gated on how often this fires). Reuses NetEvidence, so it can
+    // never disagree with the net-negative flag on what "net" means. Warn tier — does not
+    // escalate to requires_review on its own. A small epsilon avoids firing on a float-noise
+    // tie (a genuinely tied selection is a valid choice, not a divergence).
+    private static void CheckSelectionBestWeighted(Node conclusion, List<Node> nodes, List<Edge> edges, ReasoningValidationResult result)
+    {
+        const double epsilon = 1e-9;
+        var hypothesisIds = nodes.Where(n => n.Reasoning?.Role == ReasoningRoles.Hypothesis).Select(n => n.Id).ToList();
+        if (hypothesisIds.Count == 0)
+            return;
+
+        foreach (var sel in edges.Where(e => e.Kind == ReasoningEdges.Selects && e.From == conclusion.Id))
+        {
+            var selectedId = sel.To;
+            var selectedNet = NetEvidence(selectedId, edges);
+
+            var bestId = hypothesisIds[0];
+            var bestNet = double.NegativeInfinity;
+            foreach (var h in hypothesisIds)
+            {
+                var net = NetEvidence(h, edges);
+                if (net > bestNet) { bestNet = net; bestId = h; }
+            }
+
+            if (selectedNet < bestNet - epsilon)
+                result.Diagnostics.Add(new ReasoningDiagnostic(
+                    ReasoningSeverity.Warn, ReasoningDiagnosticCodes.SelectionNotBestWeighted,
+                    // Invariant culture: a diagnostic is a serialized audit artifact, its number
+                    // format must not depend on the server's locale (e.g. "0.5" not "0,5").
+                    FormattableString.Invariant($"Selected hypothesis '{selectedId}' (net {selectedNet:0.##}) is not the best-weighted; '{bestId}' has net {bestNet:0.##}."),
+                    NodeId: conclusion.Id, EdgeFrom: conclusion.Id, EdgeTo: selectedId));
         }
     }
 

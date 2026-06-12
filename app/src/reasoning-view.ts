@@ -74,7 +74,6 @@ export function buildArgumentView(
   openUncertainties: string[],
 ): ArgumentView {
   const nodeById = new Map(graph.nodes.map((n) => [n.id, n]));
-  const diagFor = (id: string) => diagnostics.filter((d) => d.nodeId === id);
 
   // Each role group in stable-id order: labels AND row order are then a deterministic
   // function of the persisted ids, so a reordered (or reloaded) graph renders identically.
@@ -97,6 +96,12 @@ export function buildArgumentView(
     ? new RegExp("\\b(?:" + [...label.keys()].map((k) => k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") + ")\\b", "g")
     : null;
   const relabel = (text: string) => (proseRe ? text.replace(proseRe, (t) => label.get(t) ?? t) : text);
+
+  // Diagnostic messages embed persisted ids (e.g. selection_not_best_weighted names the
+  // selected vs best-weighted hypothesis); relabel them to display labels with the SAME map,
+  // so the warn reads "Selected 'H1' … 'H2' has net …", consistent with the edges.
+  const relabeledDiagnostics = diagnostics.map((d) => ({ ...d, message: relabel(d.message) }));
+  const diagFor = (id: string) => relabeledDiagnostics.filter((d) => d.nodeId === id);
 
   const frameNode = byRole("frame")[0];
 
@@ -163,7 +168,7 @@ export function buildArgumentView(
     evaluation,
     evaluationRationale,
     conclusion,
-    diagnostics,
+    diagnostics: relabeledDiagnostics,
   } satisfies ArgumentView;
 }
 

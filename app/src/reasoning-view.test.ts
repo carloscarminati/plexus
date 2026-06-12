@@ -159,6 +159,27 @@ describe("buildArgumentView — evaluation rationale", () => {
   });
 });
 
+// ── diagnostic message relabel (Finding C render): ids → labels ──────────────
+describe("buildArgumentView — diagnostic messages are relabeled", () => {
+  it("relabels persisted ids in a diagnostic message to display labels, attached to the node", () => {
+    const d: ReasoningDiagnostic = {
+      severity: "warn",
+      code: "selection_not_best_weighted",
+      message: "Selected hypothesis 'n4' (net 0.5) is not the best-weighted; 'n5' has net 0.9.",
+      nodeId: "n7", // the conclusion
+    };
+
+    const v = buildArgumentView(cleanGraph(), [d], []);
+
+    // n4 → H1 (first hypothesis), n5 → H2 (second), surfaced on the conclusion
+    expect(v.conclusion!.diagnostics[0].message).toBe(
+      "Selected hypothesis 'H1' (net 0.5) is not the best-weighted; 'H2' has net 0.9.",
+    );
+    expect(v.diagnostics[0].message).toContain("'H1'");
+    expect(v.conclusion!.diagnostics[0].code).toBe("selection_not_best_weighted");
+  });
+});
+
 // ── prose relabel (F4): prose ids → the same labels the edges use ────────────
 describe("buildArgumentView — prose and edges share one namespace", () => {
   it("relabels persisted-id tokens in prose to their display labels (the gate)", () => {
