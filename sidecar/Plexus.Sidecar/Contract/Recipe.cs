@@ -50,7 +50,7 @@ public static class Recipes
             new() { Id = "hypotheses", Role = ReasoningRoles.Hypothesis, Array = true, MinItems = 2, MaxItems = 6,
                     Prompt = "Propose 2–6 candidate explanations covering the plausible space, each addressing an uncertainty.\nReply as JSON: {\"hypotheses\":[{\"statement\":\"…\",\"addresses\":[\"u0\"]}]}", DecisionSeam = true },
             new() { Id = "evaluation", Role = ReasoningRoles.Evaluation,
-                    Prompt = "Weigh the facts for/against each hypothesis (weight 0–1 magnitude).\nReply as JSON: {\"weighings\":[{\"fact\":\"f0\",\"hypothesis\":\"h0\",\"stance\":\"supports|refutes\",\"weight\":0.0}]}", DecisionSeam = true },
+                    Prompt = "Weigh the facts for/against each hypothesis (weight 0–1 magnitude), and give a rationale: which evidence tips the balance and why the best-supported hypothesis beats the rivals (refer to facts/hypotheses by their ids).\nReply as JSON: {\"weighings\":[{\"fact\":\"f0\",\"hypothesis\":\"h0\",\"stance\":\"supports|refutes\",\"weight\":0.0}],\"rationale\":\"…\"}", DecisionSeam = true },
             new() { Id = "conclusion", Role = ReasoningRoles.Conclusion,
                     Prompt = "Select the best-supported hypothesis and cite the facts.\nReply as JSON: {\"selects\":\"h0\",\"cites\":[\"f0\"],\"summary\":\"…\"}" },
         },

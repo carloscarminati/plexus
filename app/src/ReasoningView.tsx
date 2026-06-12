@@ -89,6 +89,7 @@ export function ReasoningView({
       </Section>
 
       <Section title="Evaluation">
+        {v.evaluationRationale && <p className="reasoning-rationale">{v.evaluationRationale}</p>}
         {v.evaluation.map((r) => (
           <Item key={r.hypothesisLabel} label={r.hypothesisLabel}>
             {r.weighings

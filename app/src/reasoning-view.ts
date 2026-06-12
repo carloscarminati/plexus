@@ -50,6 +50,7 @@ export interface ArgumentView {
   uncertainties: UncertaintyItem[];
   hypotheses: HypothesisItem[];
   evaluation: EvaluationRow[];
+  evaluationRationale?: string; // F2 — the qualitative "why" behind the weighing (the eval node's content)
   conclusion?: ConclusionItem;
   diagnostics: ReasoningDiagnostic[]; // all, for a summary banner
 }
@@ -139,6 +140,12 @@ export function buildArgumentView(
     }))
     .filter((row) => row.weighings.length > 0);
 
+  // F2: the evaluation node's content is the rationale (was a bare "Evaluation" placeholder
+  // pre-F2). Relabel its refs to display labels like any prose; skip the placeholder.
+  const evalNode = byRole("evaluation")[0];
+  const evaluationRationale =
+    evalNode && evalNode.raw && evalNode.raw !== "Evaluation" ? relabel(evalNode.raw) : undefined;
+
   const conclNode = byRole("conclusion")[0];
   const conclusion: ConclusionItem | undefined = conclNode && {
     id: conclNode.id,
@@ -154,6 +161,7 @@ export function buildArgumentView(
     uncertainties,
     hypotheses,
     evaluation,
+    evaluationRationale,
     conclusion,
     diagnostics,
   } satisfies ArgumentView;

@@ -411,7 +411,11 @@ public static class RecipeExecutor
             case ReasoningRoles.Evaluation:
             {
                 var ev = value.Deserialize<EvaluationEmission>(PlexusJson.Options)!;
-                s.Bind(prefix, s.AddNode(ReasoningRoles.Evaluation, "Evaluation", new ReasoningMeta { Role = ReasoningRoles.Evaluation }), "Evaluation");
+                // F2: the rationale is the evaluation node's content (was a bare "Evaluation"
+                // placeholder). The verdict still derives from the weighing edges below — the
+                // rationale is the qualitative complement. F4 canonicalizes its refs to ids.
+                var evalText = string.IsNullOrWhiteSpace(ev.Rationale) ? "Evaluation" : ev.Rationale.Trim();
+                s.Bind(prefix, s.AddNode(ReasoningRoles.Evaluation, evalText, new ReasoningMeta { Role = ReasoningRoles.Evaluation }), evalText);
                 foreach (var w in ev.Weighings)
                     if (s.RefToId.TryGetValue(w.Fact, out var fid) && s.RefToId.TryGetValue(w.Hypothesis, out var hid))
                         s.Graph.Edges.Add(new Edge { From = fid, To = hid, Kind = EdgeKindForStance(w.Stance), Weight = w.Weight });

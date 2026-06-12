@@ -50,6 +50,10 @@ public sealed class WeighingEmission
 public sealed class EvaluationEmission
 {
     [JsonRequired] public List<WeighingEmission> Weighings { get; set; } = new();
+    // F2 — the qualitative "why" behind the weighing (overall, one per evaluation): which
+    // evidence tipped it, why the selected hypothesis beats the rivals. Optional (additive,
+    // backward-compatible); the quantitative verdict still derives from the edge weights.
+    public string? Rationale { get; set; }
 }
 
 public sealed class ConclusionEmission
@@ -104,6 +108,9 @@ public static class ReasoningSchemas
             ["properties"] = new JsonObject
             {
                 ["weighings"] = new JsonObject { ["type"] = "array", ["items"] = RefinedItemSchema(typeof(WeighingEmission)) },
+                // F2 — the comparative rationale, emitted alongside the weighings in one call.
+                // Not required (additive): a model that omits it still validates structurally.
+                ["rationale"] = new JsonObject { ["type"] = "string" },
             },
             ["required"] = new JsonArray("weighings"),
         };

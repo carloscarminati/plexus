@@ -140,6 +140,25 @@ describe("buildArgumentView — references are id-keyed, not position-keyed", ()
   });
 });
 
+// ── evaluation rationale (F2): the eval node's qualitative "why" ─────────────
+describe("buildArgumentView — evaluation rationale", () => {
+  it("surfaces the eval node's rationale, relabeled, beside the weighings", () => {
+    const g = cleanGraph();
+    const evalN = g.nodes.find((n) => n.reasoning?.role === "evaluation")!;
+    evalN.raw = "n4 wins: n1 backs it strongly; rival n5 is weak."; // persisted ids → labels
+
+    const v = buildArgumentView(g, [], []);
+
+    expect(v.evaluationRationale).toBe("H1 wins: F1 backs it strongly; rival H2 is weak.");
+    expect(v.evaluation.length).toBeGreaterThan(0); // the weighed breakdown is still there
+  });
+
+  it("treats the bare 'Evaluation' placeholder as no rationale", () => {
+    const v = buildArgumentView(cleanGraph(), [], []); // fixture eval node raw === "Evaluation"
+    expect(v.evaluationRationale).toBeUndefined();
+  });
+});
+
 // ── prose relabel (F4): prose ids → the same labels the edges use ────────────
 describe("buildArgumentView — prose and edges share one namespace", () => {
   it("relabels persisted-id tokens in prose to their display labels (the gate)", () => {
