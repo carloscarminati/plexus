@@ -268,6 +268,7 @@ public sealed class WebSocketHub
                     Diagnostics = result.Diagnostics.ToList(),
                     OpenUncertainties = result.OpenUncertainties.ToList(),
                     Adjudication = _store.LoadAdjudication(lrg.GraphId), // travels with the graph, if one exists
+                    HypothesisNets = ReasoningGraphValidator.HypothesisNets(rgraph).ToDictionary(kv => kv.Key, kv => kv.Value), // R3: the matrix's column nets
                 });
                 break;
             }

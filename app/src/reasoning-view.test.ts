@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { Graph, Node, Edge, ReasoningDiagnostic, ReasoningRole } from "./contract";
-import { buildArgumentView, reduceReasoning, emptyReasoningSession, deriveReviewState, EVALUATION_RATIONALE_NOTE, type ArgumentView } from "./reasoning-view";
+import { buildArgumentView, buildEvaluationMatrix, reduceReasoning, emptyReasoningSession, deriveReviewState, EVALUATION_RATIONALE_NOTE, type ArgumentView } from "./reasoning-view";
 
 // ── fixtures ────────────────────────────────────────────────────────────────
 const rnode = (id: string, role: ReasoningRole, raw: string, src?: { kind: string; ref: string }): Node => ({
@@ -186,6 +186,70 @@ describe("buildArgumentView — diagnostic messages are relabeled", () => {
     );
     expect(v.diagnostics[0].message).toContain("'H1'");
     expect(v.conclusion!.diagnostics[0].code).toBe("selection_not_best_weighted");
+  });
+});
+
+// ── evaluation matrix (R3, ACH): faithful structural projection ──────────────
+function matrixGraph(): Graph {
+  return {
+    id: "g",
+    nodes: [
+      rnode("n1", "fact", "F-one", { kind: "doc", ref: "s1" }),
+      rnode("n2", "fact", "F-two", { kind: "doc", ref: "s2" }),
+      rnode("n4", "hypothesis", "H-one"),
+      rnode("n5", "hypothesis", "H-two"),
+      rnode("n7", "conclusion", "C"),
+    ],
+    edges: [
+      e("n1", "n4", "supports", 0.8),
+      e("n1", "n5", "refutes", 0.3), // F1 discriminates: supports H1, refutes H2
+      e("n2", "n5", "supports", 0.6),
+      e("n7", "n4", "selects"),
+    ],
+  };
+}
+
+describe("buildEvaluationMatrix", () => {
+  it("projects facts × hypotheses with signed cells; a discriminating fact spans both columns", () => {
+    const m = buildEvaluationMatrix(matrixGraph(), { n4: 0.8, n5: 0.3 });
+
+    expect(m.hypCols.map((h) => h.label)).toEqual(["H1", "H2"]);
+    expect(m.factRows.map((f) => f.label)).toEqual(["F1", "F2"]);
+    // F1 supports H1 (+0.8) AND refutes H2 (−0.3): opposite signs across the columns — the
+    // discrimination the matrix exists to show.
+    expect(m.factRows.find((f) => f.label === "F1")!.cells).toEqual([0.8, -0.3]);
+    // F2 weighs only on H2: empty (null) in H1's column.
+    expect(m.factRows.find((f) => f.label === "F2")!.cells).toEqual([null, 0.6]);
+  });
+
+  it("shows the SERVER net per column — never recomputed from the cells", () => {
+    // absurd nets that do NOT match the cell sums → proves colNet reads the server's value.
+    const m = buildEvaluationMatrix(matrixGraph(), { n4: 99, n5: -5 });
+    expect(m.hypCols.find((h) => h.label === "H1")!.net).toBe(99);
+    expect(m.hypCols.find((h) => h.label === "H2")!.net).toBe(-5);
+  });
+
+  it("marks selected + best-weighted and flags the divergence when they differ", () => {
+    // selected = H1 (net 0.3); H2 has the higher net (0.7) → divergent (same fact C's warn reports).
+    const m = buildEvaluationMatrix(matrixGraph(), { n4: 0.3, n5: 0.7 });
+    expect(m.selectedId).toBe("n4");
+    expect(m.bestWeightedId).toBe("n5");
+    expect(m.hypCols.find((h) => h.label === "H1")!.selected).toBe(true);
+    expect(m.hypCols.find((h) => h.label === "H2")!.bestWeighted).toBe(true);
+    expect(m.divergent).toBe(true);
+  });
+
+  it("no divergence when the selected column is the best-weighted", () => {
+    const m = buildEvaluationMatrix(matrixGraph(), { n4: 0.9, n5: 0.4 }); // selected H1 is the argmax
+    expect(m.divergent).toBe(false);
+    expect(m.bestWeightedId).toBe("n4");
+  });
+
+  it("rows = only facts with a weighing edge", () => {
+    const g = matrixGraph();
+    g.nodes.push(rnode("n3", "fact", "unweighed", { kind: "doc", ref: "s3" })); // no supports/refutes edge
+    const m = buildEvaluationMatrix(g, { n4: 0.8, n5: 0.3 });
+    expect(m.factRows.map((f) => f.label)).toEqual(["F1", "F2"]); // F3 excluded
   });
 });
 

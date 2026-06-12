@@ -81,25 +81,33 @@ function stableIdCompare(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
+// A role's nodes in stable-id order (id-rank, never array position) — so labels and row
+// order are a deterministic function of the persisted ids (a reorder renumbers nothing).
+const roleNodes = (graph: Graph, role: string) =>
+  graph.nodes.filter((n) => n.reasoning?.role === role).sort((x, y) => stableIdCompare(x.id, y.id));
+
+// The id→display-label map (F1, H1, U1), SHARED by the argument view, the prose relabel, and
+// the evaluation matrix — so F1 means the same fact everywhere (the cross-check lines up).
+function buildLabelMap(graph: Graph): Map<string, string> {
+  const label = new Map<string, string>();
+  const group = (role: string, prefix: string) =>
+    roleNodes(graph, role).forEach((n, i) => label.set(n.id, `${prefix}${i + 1}`));
+  group("fact", "F");
+  group("hypothesis", "H");
+  group("uncertainty", "U");
+  return label;
+}
+
 export function buildArgumentView(
   graph: Graph,
   diagnostics: ReasoningDiagnostic[],
   openUncertainties: string[],
 ): ArgumentView {
   const nodeById = new Map(graph.nodes.map((n) => [n.id, n]));
+  const byRole = (role: string) => roleNodes(graph, role);
 
-  // Each role group in stable-id order: labels AND row order are then a deterministic
-  // function of the persisted ids, so a reordered (or reloaded) graph renders identically.
-  const byRole = (role: string) =>
-    graph.nodes.filter((n) => n.reasoning?.role === role).sort((x, y) => stableIdCompare(x.id, y.id));
-
-  // Assign display labels (F1, H1, U1) by id-rank within the role — never by array index.
-  const label = new Map<string, string>();
-  const labelGroup = (role: string, prefix: string) =>
-    byRole(role).forEach((n, i) => label.set(n.id, `${prefix}${i + 1}`));
-  labelGroup("fact", "F");
-  labelGroup("hypothesis", "H");
-  labelGroup("uncertainty", "U");
+  // Display labels (F1, H1, U1) by id-rank — the SAME map the matrix uses (shared helper).
+  const label = buildLabelMap(graph);
   const lbl = (id: string) => label.get(id) ?? id;
 
   // F4: prose carries persisted node ids (canonicalized at persist); rewrite each whole-word
@@ -187,6 +195,79 @@ export function buildArgumentView(
   } satisfies ArgumentView;
 }
 
+// ── evaluation matrix (R3, ACH) — the faithful structural "why" ──────────────
+// A facts × hypotheses projection of the SAME edges + weights the validator reads. Cells are
+// signed weights (supports +, refutes −) straight from the edges (raw data, no computation);
+// column nets come from the SERVER (hypothesisNets, via NetEvidence) — never recomputed in TS,
+// so the matrix can't drift from the verdict / the net-negative flag / the off-argmax warn.
+export interface MatrixHypCol {
+  id: string;
+  label: string; // H1, H2…
+  net: number; // server net (single source of truth)
+  selected: boolean; // the conclusion's selected hypothesis
+  bestWeighted: boolean; // argmax(net)
+}
+export interface MatrixFactRow {
+  id: string;
+  label: string; // F1, F2…
+  cells: (number | null)[]; // signed weight per hypCol (index-aligned); null = no edge
+}
+export interface EvaluationMatrix {
+  hypCols: MatrixHypCol[];
+  factRows: MatrixFactRow[];
+  selectedId?: string;
+  bestWeightedId?: string;
+  divergent: boolean; // selected ≠ best-weighted (the same fact C's warn reports)
+}
+
+export function buildEvaluationMatrix(graph: Graph, hypothesisNets: Record<string, number>): EvaluationMatrix {
+  const label = buildLabelMap(graph);
+  const lbl = (id: string) => label.get(id) ?? id;
+  const epsilon = 1e-9;
+
+  const hyps = roleNodes(graph, "hypothesis");
+  const selectedId = graph.edges.find((e) => e.kind === "selects")?.to;
+
+  // best-weighted = argmax of the SERVER nets (read, not recomputed).
+  let bestWeightedId: string | undefined;
+  let bestNet = -Infinity;
+  for (const h of hyps) {
+    const net = hypothesisNets[h.id] ?? 0;
+    if (net > bestNet) {
+      bestNet = net;
+      bestWeightedId = h.id;
+    }
+  }
+
+  const hypCols: MatrixHypCol[] = hyps.map((h) => ({
+    id: h.id,
+    label: lbl(h.id),
+    net: hypothesisNets[h.id] ?? 0,
+    selected: h.id === selectedId,
+    bestWeighted: h.id === bestWeightedId,
+  }));
+
+  // signed weight of a fact→hyp weighing edge (supports +, refutes −), or null if none.
+  const signedCell = (factId: string, hypId: string): number | null => {
+    const e = graph.edges.find(
+      (x) => x.from === factId && x.to === hypId && (x.kind === "supports" || x.kind === "refutes"),
+    );
+    if (!e) return null;
+    const w = e.weight ?? 0;
+    return e.kind === "supports" ? w : -w;
+  };
+
+  // rows = facts with ≥1 supports/refutes edge to some hypothesis.
+  const factRows: MatrixFactRow[] = roleNodes(graph, "fact")
+    .filter((f) => graph.edges.some((e) => e.from === f.id && (e.kind === "supports" || e.kind === "refutes")))
+    .map((f) => ({ id: f.id, label: lbl(f.id), cells: hyps.map((h) => signedCell(f.id, h.id)) }));
+
+  const divergent =
+    selectedId != null && bestWeightedId != null && (hypothesisNets[selectedId] ?? 0) < bestNet - epsilon;
+
+  return { hypCols, factRows, selectedId, bestWeightedId, divergent };
+}
+
 // ── review state (Rx.2.1) — derived, no new persisted state ──────────────────
 // A flagged PERSISTED graph already implies escalate-exhausted (the run finished and the
 // flag stuck), so "needs a human" is a pure function of what already travels with the
@@ -214,6 +295,7 @@ export interface ReasoningSession {
   diagnostics: ReasoningDiagnostic[];
   openUncertainties: string[];
   adjudication: Adjudication | null; // ADR-0002 Rx.2.0 — the human decision, beside (never folded into) the reasoning
+  hypothesisNets: Record<string, number>; // R3 — server-computed per-hypothesis net, the matrix's column totals
   error?: string;
 }
 
@@ -223,6 +305,7 @@ export const emptyReasoningSession: ReasoningSession = {
   diagnostics: [],
   openUncertainties: [],
   adjudication: null,
+  hypothesisNets: {},
 };
 
 // Process a server event for the reasoning dev flow; returns the next session and an
@@ -245,6 +328,7 @@ export function reduceReasoning(
           diagnostics: event.diagnostics,
           openUncertainties: event.openUncertainties,
           adjudication: event.adjudication ?? null,
+          hypothesisNets: event.hypothesisNets ?? {},
         },
       };
     // Additive: the adjudication is merged beside the unchanged argument view — the graph

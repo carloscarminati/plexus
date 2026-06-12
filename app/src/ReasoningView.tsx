@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import type { Adjudication, AdjudicationDecision, Graph, ReasoningDiagnostic } from "./contract";
-import { buildArgumentView, deriveReviewState } from "./reasoning-view";
+import { buildArgumentView, buildEvaluationMatrix, deriveReviewState, type EvaluationMatrix } from "./reasoning-view";
 
 // Renders the structured-argument view from the pure view-model. Surfaces the
 // server-computed R1 diagnostics inline — a flagged conclusion is shown flagged. When an
@@ -11,15 +11,18 @@ export function ReasoningView({
   diagnostics,
   openUncertainties,
   adjudication,
+  hypothesisNets,
   onAdjudicate,
 }: {
   graph: Graph;
   diagnostics: ReasoningDiagnostic[];
   openUncertainties: string[];
   adjudication?: Adjudication | null;
+  hypothesisNets: Record<string, number>;
   onAdjudicate?: (decision: AdjudicationDecision, note?: string) => void;
 }) {
   const v = buildArgumentView(graph, diagnostics, openUncertainties);
+  const matrix = buildEvaluationMatrix(graph, hypothesisNets);
   const reviewState = deriveReviewState(v.diagnostics, adjudication);
   const warnCount = v.diagnostics.filter((d) => d.severity === "warn").length;
 
@@ -89,16 +92,11 @@ export function ReasoningView({
       </Section>
 
       <Section title="Evaluation">
-        {/* The weighted breakdown is the authoritative "why" — rendered first/prominent. */}
-        {v.evaluation.map((r) => (
-          <Item key={r.hypothesisLabel} label={r.hypothesisLabel}>
-            {r.weighings
-              .map((w) => `${w.stance === "supports" ? "supported" : "refuted"} by ${w.factLabel}${w.weight != null ? ` (${w.weight})` : ""}`)
-              .join(", ")}
-          </Item>
-        ))}
-        {/* B: the model's rationale, SUBORDINATE to the breakdown — an unverified note to
-            cross-check, not the verdict's reasoning (it can contradict the selection). */}
+        {/* R3: the facts × hypotheses matrix is the AUTHORITATIVE "why" — facts weigh on
+            hypotheses, column nets (server-computed) total the verdict; rendered prominent. */}
+        {matrix.factRows.length > 0 && <EvaluationMatrixTable matrix={matrix} />}
+        {/* B: the model's rationale, SUBORDINATE to the matrix — an unverified note to
+            cross-check against it, not the verdict's reasoning (it can contradict the selection). */}
         {v.evaluationNote && (
           <div className="reasoning-rationale-note">
             <span className="reasoning-rationale-label">{v.evaluationNote.label}</span>
@@ -173,6 +171,56 @@ function AdjudicationPanel({
 function formatWhen(iso: string): string {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
+}
+
+// R3 — the ACH matrix: facts (rows) × hypotheses (columns), cells = signed weights, column
+// footer = the server net. The selected + best-weighted columns are marked, so a selected ≠
+// best divergence (the same fact C's warn reports) is visible at a glance in the totals.
+function EvaluationMatrixTable({ matrix }: { matrix: EvaluationMatrix }) {
+  const fmt = (n: number) => (Math.round(n * 100) / 100).toString();
+  return (
+    <div className="reasoning-matrix-wrap">
+      <table className="reasoning-matrix">
+        <thead>
+          <tr>
+            <th className="reasoning-matrix-corner" />
+            {matrix.hypCols.map((h) => (
+              <th key={h.id} className={`${h.selected ? "selected" : ""} ${h.bestWeighted ? "best" : ""}`}>
+                {h.label}
+                {h.selected && <span className="reasoning-matrix-tag">selected</span>}
+                {h.bestWeighted && !h.selected && <span className="reasoning-matrix-tag best">best</span>}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {matrix.factRows.map((f) => (
+            <tr key={f.id}>
+              <th>{f.label}</th>
+              {f.cells.map((c, j) => (
+                <td key={j} className={c == null ? "empty" : c > 0 ? "pos" : "neg"}>
+                  {c == null ? "·" : `${c > 0 ? "+" : ""}${fmt(c)}`}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr>
+            <th>net</th>
+            {matrix.hypCols.map((h) => (
+              <td key={h.id} className={`reasoning-matrix-net ${h.selected ? "selected" : ""}`}>{fmt(h.net)}</td>
+            ))}
+          </tr>
+        </tfoot>
+      </table>
+      {matrix.divergent && (
+        <p className="reasoning-matrix-divergence">
+          The selected hypothesis is not the best-weighted column — see the net totals.
+        </p>
+      )}
+    </div>
+  );
 }
 
 function Section({ title, children }: { title: string; children: ReactNode }) {

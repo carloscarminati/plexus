@@ -113,6 +113,18 @@ public static class ReasoningGraphValidator
         return net;
     }
 
+    // R3 projection (additive): the per-hypothesis net, the SAME number the verdict, the
+    // net-negative flag and the off-argmax warn read — via the SAME NetEvidence helper, so the
+    // evaluation matrix shows the server's net and never recomputes it in TS (no port drift).
+    // Pure projection of the graph; computes no diagnostics, changes nothing.
+    public static IReadOnlyDictionary<string, double> HypothesisNets(Graph graph)
+    {
+        var nets = new Dictionary<string, double>(StringComparer.Ordinal);
+        foreach (var h in graph.Nodes.Where(n => n.Reasoning?.Role == ReasoningRoles.Hypothesis))
+            nets[h.Id] = NetEvidence(h.Id, graph.Edges);
+        return nets;
+    }
+
     // Invariant 2 (flag): a conclusion that `selects` a hypothesis whose net evidence
     // (Σ supports − Σ refutes, by magnitude) is negative is contested → flag it.
     private static void CheckSelectedNetEvidence(Node conclusion, List<Edge> edges, ReasoningValidationResult result)

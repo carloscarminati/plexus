@@ -270,5 +270,5 @@ export type ServerEvent =
   | { type: "error"; message: string }
   // ADR-0002 Rx — recipe run finished; reasoning graph + server-computed R1 diagnostics.
   | { type: "recipe_run_done"; graphId: string }
-  | { type: "reasoning_graph"; graph: Graph; diagnostics: ReasoningDiagnostic[]; openUncertainties: string[]; adjudication?: Adjudication }
+  | { type: "reasoning_graph"; graph: Graph; diagnostics: ReasoningDiagnostic[]; openUncertainties: string[]; adjudication?: Adjudication; hypothesisNets?: Record<string, number> }
   | { type: "adjudication_saved"; graphId: string; adjudication: Adjudication };

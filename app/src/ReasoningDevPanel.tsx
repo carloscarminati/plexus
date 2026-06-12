@@ -49,6 +49,7 @@ export function ReasoningDevPanel({
               diagnostics={session.diagnostics}
               openUncertainties={session.openUncertainties}
               adjudication={session.adjudication}
+              hypothesisNets={session.hypothesisNets}
               onAdjudicate={(decision, note) => onAdjudicate(session.graph!.id, decision, note)}
             />
           )}

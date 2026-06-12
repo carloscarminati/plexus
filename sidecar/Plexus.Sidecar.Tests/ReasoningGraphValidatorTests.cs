@@ -347,6 +347,48 @@ public class ReasoningGraphValidatorTests
         }
     }
 
+    // ── R3 projection: per-hypothesis net via the SAME NetEvidence the verdict uses ──
+    [Fact]
+    public void HypothesisNets_ProjectsNetPerHypothesis_ViaNetEvidence()
+    {
+        // h1: +0.8 −0.3 = 0.5; h2: +0.4. Only hypotheses appear.
+        var nodes = new[] { N("e1"), N("e2"), N("e3"), R("h1", ReasoningRoles.Hypothesis), R("h2", ReasoningRoles.Hypothesis) };
+        var edges = new[]
+        {
+            E("e1", "h1", ReasoningEdges.Supports, 0.8),
+            E("e2", "h1", ReasoningEdges.Refutes, 0.3),
+            E("e3", "h2", ReasoningEdges.Supports, 0.4),
+        };
+
+        var nets = ReasoningGraphValidator.HypothesisNets(G(nodes, edges));
+
+        Assert.Equal(2, nets.Count); // only hypotheses
+        Assert.Equal(0.5, nets["h1"], 9);
+        Assert.Equal(0.4, nets["h2"], 9);
+    }
+
+    // Additive: the projection is read-only — it raises no diagnostics and the net-negative
+    // verdict is byte-identical to the same graph validated normally (shared NetEvidence).
+    [Fact]
+    public void HypothesisNets_IsAdditive_NetMatchesTheNetNegativeVerdict()
+    {
+        var nodes = new[] { N("e1"), N("e2"), R("h", ReasoningRoles.Hypothesis), R("c", ReasoningRoles.Conclusion) };
+        var edges = new[]
+        {
+            E("e1", "h", ReasoningEdges.Supports, 0.2),
+            E("e2", "h", ReasoningEdges.Refutes, 0.9), // net = −0.7
+            E("c", "h", ReasoningEdges.Selects),
+        };
+        var g = G(nodes, edges);
+
+        var nets = ReasoningGraphValidator.HypothesisNets(g);
+        var d = Assert.Single(ReasoningGraphValidator.Validate(g).Diagnostics);
+
+        Assert.Equal(-0.7, nets["h"], 9);                                // the projection's net…
+        Assert.Equal(ReasoningDiagnosticCodes.ConclusionNetNegative, d.Code); // …matches the flag's net (-0.7), same source
+        Assert.Contains("0.7", d.Message);
+    }
+
     // ── backward-compat: a legacy conversation graph is a clean no-op ───────
     [Fact]
     public void LegacyGraph_NoReasoningRoles_IsNoOp()

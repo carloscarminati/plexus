@@ -1503,6 +1503,71 @@ body.col-resizing {
   font-size: 14px;
   color: var(--text);
 }
+/* R3 — the evaluation matrix (ACH): the authoritative facts × hypotheses breakdown. */
+.reasoning-matrix-wrap {
+  overflow-x: auto;
+  margin-bottom: 4px;
+}
+.reasoning-matrix {
+  border-collapse: collapse;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.reasoning-matrix th,
+.reasoning-matrix td {
+  border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  padding: 4px 8px;
+  text-align: center;
+}
+.reasoning-matrix thead th {
+  color: var(--muted);
+  font-weight: 600;
+}
+.reasoning-matrix tbody th {
+  color: var(--accent);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.reasoning-matrix th.selected,
+.reasoning-matrix td.selected {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.reasoning-matrix th.best {
+  box-shadow: inset 0 -2px 0 #5cc97a;
+}
+.reasoning-matrix-tag {
+  display: block;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--accent);
+}
+.reasoning-matrix-tag.best {
+  color: #5cc97a;
+}
+.reasoning-matrix td.pos {
+  color: #5cc97a;
+}
+.reasoning-matrix td.neg {
+  color: #ff8585;
+}
+.reasoning-matrix td.empty {
+  color: var(--muted);
+  opacity: 0.5;
+}
+.reasoning-matrix tfoot th,
+.reasoning-matrix tfoot td {
+  font-weight: 600;
+  border-top: 2px solid var(--border);
+}
+.reasoning-matrix-net {
+  color: var(--text);
+}
+.reasoning-matrix-divergence {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: #e7a850;
+}
+
 /* B — the model's rationale: SUBORDINATE to the weighted breakdown (rendered below it),
    muted and captioned as an unverified note, so the reviewer doesn't read it as the verdict. */
 .reasoning-rationale-note {

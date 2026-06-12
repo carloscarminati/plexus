@@ -267,6 +267,9 @@ public sealed class ReasoningGraphServerEvent : ServerEvent
     public List<ReasoningDiagnostic> Diagnostics { get; set; } = new();
     public List<string> OpenUncertainties { get; set; } = new();
     public Adjudication? Adjudication { get; set; } // ADR-0002 Rx.2.0 — the human decision, if one exists; travels with the graph
+    // R3 — per-hypothesis net (server-computed via NetEvidence), the single source the
+    // evaluation matrix shows for column totals; the TS side never recomputes it.
+    public Dictionary<string, double> HypothesisNets { get; set; } = new();
 }
 
 // Consolidated, secret-free config snapshot for the Settings panel.
