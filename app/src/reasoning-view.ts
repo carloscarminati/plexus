@@ -220,10 +220,13 @@ export interface EvaluationMatrix {
   divergent: boolean; // selected ≠ best-weighted (the same fact C's warn reports)
 }
 
-export function buildEvaluationMatrix(graph: Graph, hypothesisNets: Record<string, number>): EvaluationMatrix {
+export function buildEvaluationMatrix(
+  graph: Graph,
+  hypothesisNets: Record<string, number>,
+  diagnostics: ReasoningDiagnostic[],
+): EvaluationMatrix {
   const label = buildLabelMap(graph);
   const lbl = (id: string) => label.get(id) ?? id;
-  const epsilon = 1e-9;
 
   const hyps = roleNodes(graph, "hypothesis");
   const selectedId = graph.edges.find((e) => e.kind === "selects")?.to;
@@ -262,8 +265,10 @@ export function buildEvaluationMatrix(graph: Graph, hypothesisNets: Record<strin
     .filter((f) => graph.edges.some((e) => e.from === f.id && (e.kind === "supports" || e.kind === "refutes")))
     .map((f) => ({ id: f.id, label: lbl(f.id), cells: hyps.map((h) => signedCell(f.id, h.id)) }));
 
-  const divergent =
-    selectedId != null && bestWeightedId != null && (hypothesisNets[selectedId] ?? 0) < bestNet - epsilon;
+  // Divergence IS C's verdict (the selection_not_best_weighted warn), not a TS recompute —
+  // so the matrix mark can never drift from the warn at the ε boundary (single-sourced, like
+  // the nets). bestWeightedId stays a display highlight of the argmax over the shown nets.
+  const divergent = diagnostics.some((d) => d.code === "selection_not_best_weighted");
 
   return { hypCols, factRows, selectedId, bestWeightedId, divergent };
 }
@@ -328,7 +333,7 @@ export function reduceReasoning(
           diagnostics: event.diagnostics,
           openUncertainties: event.openUncertainties,
           adjudication: event.adjudication ?? null,
-          hypothesisNets: event.hypothesisNets ?? {},
+          hypothesisNets: event.hypothesisNets,
         },
       };
     // Additive: the adjudication is merged beside the unchanged argument view — the graph

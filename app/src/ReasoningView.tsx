@@ -22,7 +22,7 @@ export function ReasoningView({
   onAdjudicate?: (decision: AdjudicationDecision, note?: string) => void;
 }) {
   const v = buildArgumentView(graph, diagnostics, openUncertainties);
-  const matrix = buildEvaluationMatrix(graph, hypothesisNets);
+  const matrix = buildEvaluationMatrix(graph, hypothesisNets, v.diagnostics);
   const reviewState = deriveReviewState(v.diagnostics, adjudication);
   const warnCount = v.diagnostics.filter((d) => d.severity === "warn").length;
 
@@ -209,7 +209,7 @@ function EvaluationMatrixTable({ matrix }: { matrix: EvaluationMatrix }) {
           <tr>
             <th>net</th>
             {matrix.hypCols.map((h) => (
-              <td key={h.id} className={`reasoning-matrix-net ${h.selected ? "selected" : ""}`}>{fmt(h.net)}</td>
+              <td key={h.id} className={`reasoning-matrix-net ${h.selected ? "selected" : ""} ${h.net < 0 ? "neg" : ""}`}>{fmt(h.net)}</td>
             ))}
           </tr>
         </tfoot>

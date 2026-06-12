@@ -121,7 +121,7 @@ export function useSidecar() {
           setReasoning((r) => ({ ...r, status: "loading" }));
           break;
         case "reasoning_graph":
-          setReasoning({ status: "ready", graph: msg.graph, diagnostics: msg.diagnostics, openUncertainties: msg.openUncertainties, adjudication: msg.adjudication ?? null, hypothesisNets: msg.hypothesisNets ?? {} });
+          setReasoning({ status: "ready", graph: msg.graph, diagnostics: msg.diagnostics, openUncertainties: msg.openUncertainties, adjudication: msg.adjudication ?? null, hypothesisNets: msg.hypothesisNets });
           break;
         // ADR-0002 Rx.2.0: a recorded adjudication — merged beside the unchanged view.
         case "adjudication_saved":

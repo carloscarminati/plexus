@@ -1562,6 +1562,10 @@ body.col-resizing {
 .reasoning-matrix-net {
   color: var(--text);
 }
+/* Finding 1: the decisive number signals its own net-negative status, not just the cells. */
+.reasoning-matrix .reasoning-matrix-net.neg {
+  color: #ff8585;
+}
 .reasoning-matrix-divergence {
   margin: 6px 0 0;
   font-size: 11px;

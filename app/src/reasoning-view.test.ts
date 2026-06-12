@@ -209,9 +209,18 @@ function matrixGraph(): Graph {
   };
 }
 
+// C's off-argmax warn (attached to the conclusion), the single source of the matrix's
+// divergence mark.
+const offArgmaxWarn: ReasoningDiagnostic = {
+  severity: "warn",
+  code: "selection_not_best_weighted",
+  message: "Selected hypothesis 'H1' (net 0.3) is not the best-weighted; 'H2' has net 0.7.",
+  nodeId: "n7",
+};
+
 describe("buildEvaluationMatrix", () => {
   it("projects facts × hypotheses with signed cells; a discriminating fact spans both columns", () => {
-    const m = buildEvaluationMatrix(matrixGraph(), { n4: 0.8, n5: 0.3 });
+    const m = buildEvaluationMatrix(matrixGraph(), { n4: 0.8, n5: 0.3 }, []);
 
     expect(m.hypCols.map((h) => h.label)).toEqual(["H1", "H2"]);
     expect(m.factRows.map((f) => f.label)).toEqual(["F1", "F2"]);
@@ -224,31 +233,33 @@ describe("buildEvaluationMatrix", () => {
 
   it("shows the SERVER net per column — never recomputed from the cells", () => {
     // absurd nets that do NOT match the cell sums → proves colNet reads the server's value.
-    const m = buildEvaluationMatrix(matrixGraph(), { n4: 99, n5: -5 });
+    const m = buildEvaluationMatrix(matrixGraph(), { n4: 99, n5: -5 }, []);
     expect(m.hypCols.find((h) => h.label === "H1")!.net).toBe(99);
     expect(m.hypCols.find((h) => h.label === "H2")!.net).toBe(-5);
   });
 
-  it("marks selected + best-weighted and flags the divergence when they differ", () => {
-    // selected = H1 (net 0.3); H2 has the higher net (0.7) → divergent (same fact C's warn reports).
-    const m = buildEvaluationMatrix(matrixGraph(), { n4: 0.3, n5: 0.7 });
+  it("marks selected + best-weighted; divergence reflects C's warn", () => {
+    // selected = H1 (net 0.3); H2 has the higher net (0.7), and C's warn is present → divergent.
+    const m = buildEvaluationMatrix(matrixGraph(), { n4: 0.3, n5: 0.7 }, [offArgmaxWarn]);
     expect(m.selectedId).toBe("n4");
-    expect(m.bestWeightedId).toBe("n5");
+    expect(m.bestWeightedId).toBe("n5"); // display highlight of the argmax (server nets)
     expect(m.hypCols.find((h) => h.label === "H1")!.selected).toBe(true);
     expect(m.hypCols.find((h) => h.label === "H2")!.bestWeighted).toBe(true);
     expect(m.divergent).toBe(true);
   });
 
-  it("no divergence when the selected column is the best-weighted", () => {
-    const m = buildEvaluationMatrix(matrixGraph(), { n4: 0.9, n5: 0.4 }); // selected H1 is the argmax
-    expect(m.divergent).toBe(false);
-    expect(m.bestWeightedId).toBe("n4");
+  it("divergent is C's warn, not a recomputed argmax — single-sourced, no ε drift", () => {
+    const g = matrixGraph();
+    // selected (n4) IS the argmax by nets, yet the warn's presence makes it divergent…
+    expect(buildEvaluationMatrix(g, { n4: 0.9, n5: 0.4 }, [offArgmaxWarn]).divergent).toBe(true);
+    // …and the warn's ABSENCE makes it not divergent, even though n4 is not the argmax.
+    expect(buildEvaluationMatrix(g, { n4: 0.3, n5: 0.7 }, []).divergent).toBe(false);
   });
 
   it("rows = only facts with a weighing edge", () => {
     const g = matrixGraph();
     g.nodes.push(rnode("n3", "fact", "unweighed", { kind: "doc", ref: "s3" })); // no supports/refutes edge
-    const m = buildEvaluationMatrix(g, { n4: 0.8, n5: 0.3 });
+    const m = buildEvaluationMatrix(g, { n4: 0.8, n5: 0.3 }, []);
     expect(m.factRows.map((f) => f.label)).toEqual(["F1", "F2"]); // F3 excluded
   });
 });
@@ -292,6 +303,7 @@ describe("reduceReasoning — dev round-trip", () => {
       graph: cleanGraph(),
       diagnostics: [flag],
       openUncertainties: [],
+      hypothesisNets: {},
     });
     expect(afterGraph.session.status).toBe("ready");
 
@@ -347,7 +359,7 @@ describe("deriveReviewState — review state is derived, not stored", () => {
   function adjudicated(adjudication: { decision: "accept" | "reject"; note: string; reviewer: string; timestamp: string }) {
     const ready = reduceReasoning(
       { ...emptyReasoningSession, status: "loading" },
-      { type: "reasoning_graph", graph: cleanGraph(), diagnostics: [flag], openUncertainties: [] },
+      { type: "reasoning_graph", graph: cleanGraph(), diagnostics: [flag], openUncertainties: [], hypothesisNets: {} },
     ).session;
     return reduceReasoning(ready, { type: "adjudication_saved", graphId: "g", adjudication }).session;
   }
@@ -364,7 +376,7 @@ describe("reduceReasoning — adjudication is recorded beside the unchanged view
   it("adjudication_saved merges the decision into a ready session, untouched graph", () => {
     const ready = reduceReasoning(
       { ...emptyReasoningSession, status: "loading" },
-      { type: "reasoning_graph", graph: cleanGraph(), diagnostics: [flag], openUncertainties: [] },
+      { type: "reasoning_graph", graph: cleanGraph(), diagnostics: [flag], openUncertainties: [], hypothesisNets: {} },
     ).session;
     expect(ready.adjudication).toBeNull();
 
@@ -377,7 +389,7 @@ describe("reduceReasoning — adjudication is recorded beside the unchanged view
   it("the flag SURVIVES an accept — adjudication sits beside it, never clears it", () => {
     const ready = reduceReasoning(
       { ...emptyReasoningSession, status: "loading" },
-      { type: "reasoning_graph", graph: cleanGraph(), diagnostics: [flag], openUncertainties: [] },
+      { type: "reasoning_graph", graph: cleanGraph(), diagnostics: [flag], openUncertainties: [], hypothesisNets: {} },
     ).session;
     const after = reduceReasoning(ready, { type: "adjudication_saved", graphId: "g", adjudication: adj }).session;
 
@@ -390,7 +402,7 @@ describe("reduceReasoning — adjudication is recorded beside the unchanged view
   it("a reloaded graph carries its adjudication back (round-trip)", () => {
     const reloaded = reduceReasoning(
       { ...emptyReasoningSession, status: "loading" },
-      { type: "reasoning_graph", graph: cleanGraph(), diagnostics: [], openUncertainties: [], adjudication: adj },
+      { type: "reasoning_graph", graph: cleanGraph(), diagnostics: [], openUncertainties: [], adjudication: adj, hypothesisNets: {} },
     ).session;
     expect(reloaded.adjudication).toEqual(adj);
   });
