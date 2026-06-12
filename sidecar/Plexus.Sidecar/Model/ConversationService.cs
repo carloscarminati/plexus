@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Plexus.Sidecar.Contract;
@@ -83,7 +84,7 @@ public sealed class ConversationService
             ParentId = primary,
             MergeParents = mergeParents,
             Role = "user",
-            CreatedAt = DateTimeOffset.UtcNow.ToString("o"),
+            CreatedAt = DateTimeOffset.UtcNow.ToString("o", CultureInfo.InvariantCulture),
             Blocks = new List<Block> { new MarkdownBlock { Text = text } },
             Raw = text,
         };
@@ -295,7 +296,7 @@ public sealed class ConversationService
         // 7. Cost + telemetry (real policy/reason; telemetry schema unchanged).
         var cost = _registry.EstimateCostUsd(choice.ProviderId, choice.ModelId, result.TokensIn, result.TokensOut);
         _telemetry.Record(new TelemetryRecord(
-            DateTimeOffset.UtcNow.ToString("o"), graphId, assistantId,
+            DateTimeOffset.UtcNow.ToString("o", CultureInfo.InvariantCulture), graphId, assistantId,
             choice.ModelId, choice.ProviderId, result.TokensIn, result.TokensOut,
             cost, sw.ElapsedMilliseconds, canonical, choice.Reason));
 
@@ -308,7 +309,7 @@ public sealed class ConversationService
             MergeParents = mergeParents,
             Kind = kind,
             Role = "assistant",
-            CreatedAt = DateTimeOffset.UtcNow.ToString("o"),
+            CreatedAt = DateTimeOffset.UtcNow.ToString("o", CultureInfo.InvariantCulture),
             Blocks = result.Blocks,
             Raw = result.Raw,
             Meta = new NodeMeta

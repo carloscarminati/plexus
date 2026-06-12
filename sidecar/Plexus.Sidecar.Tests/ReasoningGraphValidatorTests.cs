@@ -1,3 +1,4 @@
+using System.Globalization;
 using Plexus.Sidecar.Contract;
 
 namespace Plexus.Sidecar.Tests;
@@ -312,6 +313,38 @@ public class ReasoningGraphValidatorTests
         Assert.Contains(r.Diagnostics, d => d.Code == ReasoningDiagnosticCodes.ConclusionNetNegative && d.NodeId == "c");
         Assert.Contains(r.Diagnostics, d => d.Code == ReasoningDiagnosticCodes.SelectionNotBestWeighted && d.NodeId == "c");
         Assert.True(r.HasFlags); // the flag still fires — the new warn is purely additive
+    }
+
+    // ── determinism guard: diagnostic numbers are culture-invariant ─────────
+    // A diagnostic is part of the auditable record — its number format must not depend on
+    // the server's locale. This forces a COMMA-decimal ambient culture (the failure mode of
+    // ambient-culture formatting) and asserts the net renders with a "." separator. It must
+    // FAIL against ambient `{net:0.##}` and pass once the message is InvariantCulture.
+    [Fact]
+    public void NetNegativeMessage_NumberFormat_IsCultureInvariant_UnderCommaLocale()
+    {
+        var original = CultureInfo.CurrentCulture;
+        try
+        {
+            CultureInfo.CurrentCulture = new CultureInfo("es-AR"); // decimal separator = comma
+            var nodes = new[] { N("e1"), N("e2"), R("h", ReasoningRoles.Hypothesis), R("c", ReasoningRoles.Conclusion) };
+            var edges = new[]
+            {
+                E("e1", "h", ReasoningEdges.Supports, 0.2),
+                E("e2", "h", ReasoningEdges.Refutes, 0.9), // net = 0.2 − 0.9 = −0.7
+                E("c", "h", ReasoningEdges.Selects),
+            };
+
+            var d = Assert.Single(ReasoningGraphValidator.Validate(G(nodes, edges)).Diagnostics);
+
+            Assert.Equal(ReasoningDiagnosticCodes.ConclusionNetNegative, d.Code);
+            Assert.Contains("0.7", d.Message);       // invariant "." separator
+            Assert.DoesNotContain("0,7", d.Message); // never the ambient comma
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = original;
+        }
     }
 
     // ── backward-compat: a legacy conversation graph is a clean no-op ───────

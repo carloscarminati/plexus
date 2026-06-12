@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using System.Globalization;
 using Json.Schema;
 using Microsoft.Extensions.AI;
 using Plexus.Sidecar.Contract;
@@ -492,7 +493,7 @@ public static class RecipeExecutor
                 Id = id,
                 ParentId = role == ReasoningRoles.Frame ? null : _frameId,
                 Role = "assistant",
-                CreatedAt = _seq.ToString("D6"),
+                CreatedAt = _seq.ToString("D6", CultureInfo.InvariantCulture),
                 Blocks = new List<Block> { new MarkdownBlock { Text = text } },
                 Raw = text,
                 Reasoning = reasoning,

@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Data.Sqlite;
 using Plexus.Sidecar.Contract;
 using Plexus.Sidecar.Routing;
@@ -281,7 +282,7 @@ public sealed class GraphStore
         cmd.CommandText = "INSERT INTO graphs (id, title, created_at, policy_json) VALUES ($id, $title, $createdAt, $policy);";
         cmd.Parameters.AddWithValue("$id", graph.Id);
         cmd.Parameters.AddWithValue("$title", (object?)graph.Title ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("$createdAt", DateTimeOffset.UtcNow.ToString("o"));
+        cmd.Parameters.AddWithValue("$createdAt", DateTimeOffset.UtcNow.ToString("o", CultureInfo.InvariantCulture));
         cmd.Parameters.AddWithValue("$policy", PlexusJson.Serialize(graph.DefaultPolicy));
         cmd.ExecuteNonQuery();
         return graph;
@@ -303,7 +304,7 @@ public sealed class GraphStore
             g.CommandText = "INSERT INTO graphs (id, title, created_at, policy_json) VALUES ($id, $title, $createdAt, $policy);";
             g.Parameters.AddWithValue("$id", id);
             g.Parameters.AddWithValue("$title", (object?)title ?? DBNull.Value);
-            g.Parameters.AddWithValue("$createdAt", DateTimeOffset.UtcNow.ToString("o"));
+            g.Parameters.AddWithValue("$createdAt", DateTimeOffset.UtcNow.ToString("o", CultureInfo.InvariantCulture));
             g.Parameters.AddWithValue("$policy", PlexusJson.Serialize(RoutingPolicy.Manual("claude-opus-4-8")));
             g.ExecuteNonQuery();
         }
@@ -487,7 +488,7 @@ public sealed class GraphStore
             Decision = decision,
             Note = note,
             Reviewer = reviewer,
-            Timestamp = DateTimeOffset.UtcNow.ToString("o"),
+            Timestamp = DateTimeOffset.UtcNow.ToString("o", CultureInfo.InvariantCulture),
         };
         using var conn = Open();
         using var tx = conn.BeginTransaction();

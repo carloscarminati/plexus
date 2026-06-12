@@ -125,7 +125,9 @@ public static class ReasoningGraphValidator
             if (net < 0)
                 result.Diagnostics.Add(new ReasoningDiagnostic(
                     ReasoningSeverity.Flag, ReasoningDiagnosticCodes.ConclusionNetNegative,
-                    $"Conclusion '{conclusion.Id}' selects hypothesis '{hypothesisId}' with net-negative evidence ({net:0.##}).",
+                    // Invariant culture: a diagnostic is a serialized audit artifact — its number
+                    // format must not depend on the server's locale ("0.7" not "0,7").
+                    FormattableString.Invariant($"Conclusion '{conclusion.Id}' selects hypothesis '{hypothesisId}' with net-negative evidence ({net:0.##})."),
                     NodeId: conclusion.Id, EdgeFrom: conclusion.Id, EdgeTo: hypothesisId));
         }
     }
