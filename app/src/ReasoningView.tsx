@@ -89,7 +89,7 @@ export function ReasoningView({
       </Section>
 
       <Section title="Evaluation">
-        {v.evaluationRationale && <p className="reasoning-rationale">{v.evaluationRationale}</p>}
+        {/* The weighted breakdown is the authoritative "why" — rendered first/prominent. */}
         {v.evaluation.map((r) => (
           <Item key={r.hypothesisLabel} label={r.hypothesisLabel}>
             {r.weighings
@@ -97,6 +97,14 @@ export function ReasoningView({
               .join(", ")}
           </Item>
         ))}
+        {/* B: the model's rationale, SUBORDINATE to the breakdown — an unverified note to
+            cross-check, not the verdict's reasoning (it can contradict the selection). */}
+        {v.evaluationNote && (
+          <div className="reasoning-rationale-note">
+            <span className="reasoning-rationale-label">{v.evaluationNote.label}</span>
+            <p className="reasoning-rationale">{v.evaluationNote.text}</p>
+          </div>
+        )}
       </Section>
 
       {v.conclusion && (

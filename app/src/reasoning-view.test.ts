@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { Graph, Node, Edge, ReasoningDiagnostic, ReasoningRole } from "./contract";
-import { buildArgumentView, reduceReasoning, emptyReasoningSession, deriveReviewState, type ArgumentView } from "./reasoning-view";
+import { buildArgumentView, reduceReasoning, emptyReasoningSession, deriveReviewState, EVALUATION_RATIONALE_NOTE, type ArgumentView } from "./reasoning-view";
 
 // ── fixtures ────────────────────────────────────────────────────────────────
 const rnode = (id: string, role: ReasoningRole, raw: string, src?: { kind: string; ref: string }): Node => ({
@@ -140,22 +140,31 @@ describe("buildArgumentView — references are id-keyed, not position-keyed", ()
   });
 });
 
-// ── evaluation rationale (F2): the eval node's qualitative "why" ─────────────
-describe("buildArgumentView — evaluation rationale", () => {
-  it("surfaces the eval node's rationale, relabeled, beside the weighings", () => {
+// ── evaluation rationale (F2 + B): exposed as an unverified, subordinate model note ──
+describe("buildArgumentView — evaluation rationale as a model note", () => {
+  it("surfaces the rationale relabeled, as a note labeled with its epistemic status", () => {
     const g = cleanGraph();
     const evalN = g.nodes.find((n) => n.reasoning?.role === "evaluation")!;
     evalN.raw = "n4 wins: n1 backs it strongly; rival n5 is weak."; // persisted ids → labels
 
     const v = buildArgumentView(g, [], []);
 
-    expect(v.evaluationRationale).toBe("H1 wins: F1 backs it strongly; rival H2 is weak.");
-    expect(v.evaluation.length).toBeGreaterThan(0); // the weighed breakdown is still there
+    expect(v.evaluationNote?.text).toBe("H1 wins: F1 backs it strongly; rival H2 is weak.");
+    // B: the note is framed as the model's narrative, not the verdict.
+    expect(v.evaluationNote?.label).toBe(EVALUATION_RATIONALE_NOTE);
+    expect(v.evaluation.length).toBeGreaterThan(0); // the weighed breakdown is still there (authoritative)
   });
 
-  it("treats the bare 'Evaluation' placeholder as no rationale", () => {
+  it("treats the bare 'Evaluation' placeholder as no note", () => {
     const v = buildArgumentView(cleanGraph(), [], []); // fixture eval node raw === "Evaluation"
-    expect(v.evaluationRationale).toBeUndefined();
+    expect(v.evaluationNote).toBeUndefined();
+  });
+
+  it("the status label frames the rationale as unverified against the weights", () => {
+    const l = EVALUATION_RATIONALE_NOTE.toLowerCase();
+    expect(l).toContain("not"); // negates authority
+    expect(l).toMatch(/verif|deriv/); // not verified / not derived from the weights
+    expect(l).toContain("cross-check");
   });
 });
 

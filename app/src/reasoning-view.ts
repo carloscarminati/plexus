@@ -44,13 +44,26 @@ export interface ConclusionItem {
   cites: string[]; // fact labels
   diagnostics: ReasoningDiagnostic[];
 }
+// Rx B — the evaluation rationale is the MODEL's narrative. The GMN001 read showed it can
+// contradict the verdict (crown a different hypothesis than the selection), invent weights,
+// and miscite edges. So it is exposed as a NOTE with an epistemic-status label — never as
+// the authoritative "why" (that is the weighted breakdown + the selection). The render shows
+// it subordinate to the breakdown so a reviewer reads it as a model note to cross-check.
+export const EVALUATION_RATIONALE_NOTE =
+  "Model note — not derived from or verified against the weights; cross-check against the breakdown above.";
+
+export interface EvaluationNote {
+  label: string; // epistemic status (EVALUATION_RATIONALE_NOTE)
+  text: string; // the model's rationale, relabeled
+}
+
 export interface ArgumentView {
   frame?: { id: string; text: string };
   facts: FactItem[];
   uncertainties: UncertaintyItem[];
   hypotheses: HypothesisItem[];
   evaluation: EvaluationRow[];
-  evaluationRationale?: string; // F2 — the qualitative "why" behind the weighing (the eval node's content)
+  evaluationNote?: EvaluationNote; // F2 + B — the model's rationale, as an unverified note (not the verdict)
   conclusion?: ConclusionItem;
   diagnostics: ReasoningDiagnostic[]; // all, for a summary banner
 }
@@ -146,10 +159,12 @@ export function buildArgumentView(
     .filter((row) => row.weighings.length > 0);
 
   // F2: the evaluation node's content is the rationale (was a bare "Evaluation" placeholder
-  // pre-F2). Relabel its refs to display labels like any prose; skip the placeholder.
+  // pre-F2). B: expose it as an unverified model note, relabeled; skip the placeholder.
   const evalNode = byRole("evaluation")[0];
-  const evaluationRationale =
-    evalNode && evalNode.raw && evalNode.raw !== "Evaluation" ? relabel(evalNode.raw) : undefined;
+  const evaluationNote: EvaluationNote | undefined =
+    evalNode && evalNode.raw && evalNode.raw !== "Evaluation"
+      ? { label: EVALUATION_RATIONALE_NOTE, text: relabel(evalNode.raw) }
+      : undefined;
 
   const conclNode = byRole("conclusion")[0];
   const conclusion: ConclusionItem | undefined = conclNode && {
@@ -166,7 +181,7 @@ export function buildArgumentView(
     uncertainties,
     hypotheses,
     evaluation,
-    evaluationRationale,
+    evaluationNote,
     conclusion,
     diagnostics: relabeledDiagnostics,
   } satisfies ArgumentView;
