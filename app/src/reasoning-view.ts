@@ -162,15 +162,19 @@ export function buildArgumentView(
 // ── review state (Rx.2.1) — derived, no new persisted state ──────────────────
 // A flagged PERSISTED graph already implies escalate-exhausted (the run finished and the
 // flag stuck), so "needs a human" is a pure function of what already travels with the
-// graph: the R1 diagnostics (Rx-next.0) and the adjudication (Rx.2.0). Adjudication
-// resolves it; an unresolved flag/error demands a human; warns alone are advisory.
-export type ReviewState = "clean" | "requires_review" | "reviewed";
+// graph: the R1 diagnostics (Rx-next.0) and the adjudication (Rx.2.0). An adjudication
+// resolves it — but accept and reject are DISTINCT outcomes ("a reviewer rejected this" is
+// not "OK"), so the decision lives in the STATE, not just the banner. An unresolved
+// flag/error demands a human; warns alone are advisory.
+export type ReviewState = "clean" | "requires_review" | "accepted" | "rejected";
 
 export function deriveReviewState(
   diagnostics: ReasoningDiagnostic[],
   adjudication: Adjudication | null | undefined,
 ): ReviewState {
-  if (adjudication) return "reviewed"; // flagged AND adjudicated-with-reason → resolved (flag still visible)
+  // A human decision (on a flagged OR a clean graph) is the resolved outcome — accept and
+  // reject are separate states; the flag itself stays visible for audit either way.
+  if (adjudication) return adjudication.decision === "reject" ? "rejected" : "accepted";
   const flagged = diagnostics.some((d) => d.severity === "flag" || d.severity === "error");
   return flagged ? "requires_review" : "clean"; // warns alone are advisory, not review-gating
 }

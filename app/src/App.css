@@ -1461,17 +1461,24 @@ body.col-resizing {
 .review-banner span {
   opacity: 0.85;
 }
-/* RequiresHumanReview — prominent: the machine flagged and couldn't auto-resolve. */
+/* RequiresHumanReview — prominent attention: the machine flagged and couldn't auto-resolve
+   (amber, distinct from a reviewer's reject). */
 .review-banner.requires-review {
-  background: rgba(255, 107, 107, 0.13);
-  border: 1px solid rgba(255, 107, 107, 0.6);
-  color: #ff8585;
+  background: rgba(231, 168, 80, 0.14);
+  border: 1px solid rgba(231, 168, 80, 0.6);
+  color: #e7a850;
 }
-/* Reviewed — resolved; the adjudication sits below, the flag remains for audit. */
-.review-banner.reviewed {
+/* Accepted — positive: a reviewer signed off; the flag remains for audit. */
+.review-banner.accepted {
   background: color-mix(in srgb, #5cc97a 12%, transparent);
   border: 1px solid color-mix(in srgb, #5cc97a 50%, transparent);
   color: #5cc97a;
+}
+/* Rejected — negative outcome, NOT the positive green: a reviewer rejected the reasoning. */
+.review-banner.rejected {
+  background: rgba(255, 107, 107, 0.13);
+  border: 1px solid rgba(255, 107, 107, 0.6);
+  color: #ff8585;
 }
 /* Clean-with-advisory — warns surfaced, review not required. */
 .review-banner.advisory {

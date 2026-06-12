@@ -191,7 +191,8 @@ describe("reduceReasoning — dev round-trip", () => {
 describe("deriveReviewState — review state is derived, not stored", () => {
   const warn: ReasoningDiagnostic = { severity: "warn", code: "citation_not_weighed", message: "advisory" };
   const error: ReasoningDiagnostic = { severity: "error", code: "fact_no_provenance", message: "bad" };
-  const adj = { decision: "accept" as const, note: "accept despite the flag", reviewer: "carlos", timestamp: "2026-06-11T00:00:00Z" };
+  const accept = { decision: "accept" as const, note: "accept despite the flag", reviewer: "carlos", timestamp: "2026-06-11T00:00:00Z" };
+  const reject = { decision: "reject" as const, note: "the selection isn't justified", reviewer: "carlos", timestamp: "2026-06-11T00:00:00Z" };
 
   it("flag + no adjudication → requires_review", () => {
     expect(deriveReviewState([flag], null)).toBe("requires_review");
@@ -199,31 +200,48 @@ describe("deriveReviewState — review state is derived, not stored", () => {
   it("error tier also gates → requires_review", () => {
     expect(deriveReviewState([error], null)).toBe("requires_review");
   });
-  it("flag + adjudication → reviewed", () => {
-    expect(deriveReviewState([flag], adj)).toBe("reviewed");
+  it("flag + accept → accepted", () => {
+    expect(deriveReviewState([flag], accept)).toBe("accepted");
+  });
+  it("flag + reject → rejected (distinct from accepted)", () => {
+    expect(deriveReviewState([flag], reject)).toBe("rejected");
   });
   it("no flag → clean", () => {
     expect(deriveReviewState([], null)).toBe("clean");
+  });
+  it("no flag + reject → rejected (a human can reject a clean reasoning)", () => {
+    expect(deriveReviewState([], reject)).toBe("rejected");
   });
   it("warn alone → clean (advisory, not review-gating)", () => {
     expect(deriveReviewState([warn], null)).toBe("clean");
   });
 
-  it("the transition that matters: requires_review → reviewed, flag survives", () => {
+  it("transition: requires_review → accept → accepted, flag survives", () => {
     expect(deriveReviewState([flag], null)).toBe("requires_review");
+    const after = adjudicated(accept);
+    expect(deriveReviewState(after.diagnostics, after.adjudication)).toBe("accepted");
+    expect(flagStillOnConclusion(after)).toBe(true);
+  });
 
-    // adjudicate via the real reducer flow (accept-with-note lands beside the graph)
+  it("transition: requires_review → reject → rejected (not green), flag survives", () => {
+    expect(deriveReviewState([flag], null)).toBe("requires_review");
+    const after = adjudicated(reject);
+    expect(deriveReviewState(after.diagnostics, after.adjudication)).toBe("rejected");
+    expect(flagStillOnConclusion(after)).toBe(true); // rejected = flagged AND rejected-with-reason, both visible
+  });
+
+  // Drive the real reducer flow: load a flagged graph, then land the adjudication beside it.
+  function adjudicated(adjudication: { decision: "accept" | "reject"; note: string; reviewer: string; timestamp: string }) {
     const ready = reduceReasoning(
       { ...emptyReasoningSession, status: "loading" },
       { type: "reasoning_graph", graph: cleanGraph(), diagnostics: [flag], openUncertainties: [] },
     ).session;
-    const after = reduceReasoning(ready, { type: "adjudication_saved", graphId: "g", adjudication: adj }).session;
-
-    expect(deriveReviewState(after.diagnostics, after.adjudication)).toBe("reviewed");
-    // Reviewed = flagged AND adjudicated — the flag is still on the conclusion.
-    const view = buildArgumentView(after.graph!, after.diagnostics, after.openUncertainties);
-    expect(view.conclusion!.diagnostics[0].code).toBe("conclusion_net_negative");
-  });
+    return reduceReasoning(ready, { type: "adjudication_saved", graphId: "g", adjudication }).session;
+  }
+  function flagStillOnConclusion(session: ReturnType<typeof adjudicated>) {
+    const view = buildArgumentView(session.graph!, session.diagnostics, session.openUncertainties);
+    return view.conclusion!.diagnostics[0]?.code === "conclusion_net_negative";
+  }
 });
 
 // ── adjudication — additive metadata, never mutates the reasoning (Rx.2.0) ───

@@ -31,10 +31,16 @@ export function ReasoningView({
           <span>The machine flagged this reasoning and could not auto-resolve it — a human must review.</span>
         </div>
       )}
-      {reviewState === "reviewed" && (
-        <div className="review-banner reviewed">
-          <strong>✓ Reviewed</strong>
-          <span>Adjudicated by a human — the decision is recorded below; the flag remains for audit.</span>
+      {reviewState === "accepted" && (
+        <div className="review-banner accepted">
+          <strong>✓ Accepted</strong>
+          <span>A reviewer accepted this reasoning — recorded below; the flag remains for audit.</span>
+        </div>
+      )}
+      {reviewState === "rejected" && (
+        <div className="review-banner rejected">
+          <strong>✗ Rejected</strong>
+          <span>A reviewer rejected this reasoning — recorded below; the flag remains for audit.</span>
         </div>
       )}
       {reviewState === "clean" && warnCount > 0 && (
